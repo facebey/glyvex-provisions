@@ -1,0 +1,5 @@
+# Backend (FastAPI). El core de descargas viene por editable:
+#   pip install -e D:\Proyectos\hf-downloader
+fastapi>=0.115
+uvicorn[standard]>=0.30
+psutil>=5.9

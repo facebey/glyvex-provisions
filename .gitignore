@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# Node / frontend
+node_modules/
+web/dist/
+web/*.local
+
+# Entorno / secretos (el token HF vive en HF_TOKEN, nunca aqui)
+.env
+.env.*
