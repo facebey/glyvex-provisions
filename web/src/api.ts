@@ -173,6 +173,36 @@ export interface LibraryData {
   truncated: boolean
 }
 
+// Paquetes de modelos por escenario (R12): manifiestos .json en
+// <storage>\packajes\ (texto plano, portables entre servers).
+export interface PackageFile {
+  repo_id: string
+  file?: string | null     // archivo exacto (XOR con pattern)
+  pattern?: string | null  // glob, p. ej. "*Q4_K_M.gguf"
+}
+
+export interface Package {
+  id: string
+  name: string
+  scenario: string | null
+  profile: string | null
+  files: PackageFile[]
+  error: string | null  // manifiesto inválido (se muestra, no se descarga)
+}
+
+export interface PackageIn {
+  name: string
+  scenario?: string | null
+  profile?: string | null
+  files: PackageFile[]
+}
+
+export interface PackageJob {
+  id: string
+  repo_id: string
+  files: number
+}
+
 async function json<T>(r: Response): Promise<T> {
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`
@@ -255,6 +285,30 @@ export const getLibrary = (storageId?: string) =>
     '/api/library' +
       (storageId ? `?storage_id=${encodeURIComponent(storageId)}` : ''),
   ).then((r) => json<LibraryData>(r))
+
+export const listPackages = (storageId: string) =>
+  fetch(`/api/storage/${encodeURIComponent(storageId)}/packages`).then(
+    (r) => json<{ packages: Package[] }>(r),
+  )
+
+export const addPackage = (storageId: string, body: PackageIn) =>
+  fetch(`/api/storage/${encodeURIComponent(storageId)}/packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Package>(r))
+
+export const deletePackage = (storageId: string, packageId: string) =>
+  fetch(
+    `/api/storage/${encodeURIComponent(storageId)}/packages/${encodeURIComponent(packageId)}`,
+    { method: 'DELETE' },
+  ).then((r) => json<{ ok: boolean }>(r))
+
+export const downloadPackage = (storageId: string, packageId: string) =>
+  fetch(
+    `/api/storage/${encodeURIComponent(storageId)}/packages/${encodeURIComponent(packageId)}/download`,
+    { method: 'POST' },
+  ).then((r) => json<{ jobs: PackageJob[]; dest: string }>(r))
 
 export const submitDownload = (repoId: string, files: string[], dest?: string) =>
   fetch('/api/downloads', {

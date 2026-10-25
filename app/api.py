@@ -19,6 +19,7 @@ from hf_down import (MMPROJ_RE, MTP_RE, QUANT_RE, SUPPORT_EXTS,
 from . import catalog
 from . import downloads as dl
 from . import fit, hfsearch
+from . import packages
 from . import profiles
 from . import storage
 from .hardware import detect
@@ -149,6 +150,68 @@ def library(storage_id: str | None = None) -> dict:
     if storage_id is not None and storage.get_storage(storage_id) is None:
         raise HTTPException(404, f"storage inexistente: {storage_id}")
     return storage.scan_library(storage_id)
+
+
+# ---- Paquetes de modelos por escenario (R12) -----------------------------
+# Manifiestos: .json en <storage>\packajes\ (ver app/packages.py).
+
+@router.get("/storage/{storage_id}/packages")
+def list_packages(storage_id: str) -> dict:
+    s = storage.get_storage(storage_id)
+    if s is None:
+        raise HTTPException(404, f"storage inexistente: {storage_id}")
+    return {"packages": packages.list_packages(Path(s["path"]))}
+
+
+@router.post("/storage/{storage_id}/packages", status_code=201)
+def create_package(storage_id: str, body: packages.Package) -> dict:
+    s = storage.get_storage(storage_id)
+    if s is None:
+        raise HTTPException(404, f"storage inexistente: {storage_id}")
+    try:
+        return packages.create_package(Path(s["path"]), body)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+
+@router.delete("/storage/{storage_id}/packages/{package_id}")
+def delete_package(storage_id: str, package_id: str) -> dict:
+    s = storage.get_storage(storage_id)
+    if s is None:
+        raise HTTPException(404, f"storage inexistente: {storage_id}")
+    try:
+        ok = packages.delete_package(Path(s["path"]), package_id)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    if not ok:
+        raise HTTPException(404, f"paquete inexistente: {package_id}")
+    return {"ok": True}
+
+
+@router.post("/storage/{storage_id}/packages/{package_id}/download")
+def download_package(storage_id: str, package_id: str) -> dict:
+    """Descarga el paquete: 1 job por repo único, destino = el storage del
+    paquete. Los glob del manifiesto pasan directo a allow_patterns."""
+    s = storage.get_storage(storage_id)
+    if s is None:
+        raise HTTPException(404, f"storage inexistente: {storage_id}")
+    try:
+        pkg = packages.read_package(Path(s["path"]), package_id)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    if pkg is None:
+        raise HTTPException(404, f"paquete inexistente: {package_id}")
+    by_repo: dict[str, list[str]] = {}
+    for f in pkg["files"]:
+        spec = f.get("file") or f.get("pattern")
+        by_repo.setdefault(f["repo_id"], []).append(spec)
+    dest = Path(s["path"])
+    jobs = []
+    for repo_id in sorted(by_repo):
+        job = dl.manager.submit(repo_id, by_repo[repo_id], dest=dest)
+        jobs.append({"id": job.id, "repo_id": repo_id,
+                     "files": len(by_repo[repo_id])})
+    return {"jobs": jobs, "dest": str(dest)}
 
 
 @router.post("/search")

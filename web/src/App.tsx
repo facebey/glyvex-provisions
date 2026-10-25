@@ -7,20 +7,25 @@ import {
   type LibModel,
   type LibraryData,
   type ModelHit,
+  type Package,
   type Profile,
   type Regime,
   type RepoData,
   type Storage,
+  addPackage,
   addProfile,
   addStorage,
+  deletePackage,
   deleteProfile,
   deleteStorage,
+  downloadPackage,
   fmtBytes,
   getCatalog,
   getHardware,
   getLibrary,
   getRepo,
   listDownloads,
+  listPackages,
   listProfiles,
   listStorages,
   openJobEvents,
@@ -83,6 +88,15 @@ export default function App() {
   const [stPath, setStPath] = useState('')
   const [lib, setLib] = useState<LibraryData | null>(null)
   const [libFilter, setLibFilter] = useState<string>('') // '' = todos
+  // Paquetes de modelos por escenario (R12): manifiestos en <storage>\packajes\
+  const [pkgStorage, setPkgStorage] = useState('')
+  const [pkgs, setPkgs] = useState<Package[]>([])
+  const [showAddPkg, setShowAddPkg] = useState(false)
+  const [pkgName, setPkgName] = useState('')
+  const [pkgScenario, setPkgScenario] = useState('')
+  const [pkgRows, setPkgRows] = useState<{ repo: string; spec: string }[]>([
+    { repo: '', spec: '' },
+  ])
   const eventsRef = useRef<Map<string, EventSource>>(new Map())
 
   const closeJob = useCallback((id: string) => {
@@ -367,6 +381,87 @@ export default function App() {
     setError(null)
     try {
       setLib(await getLibrary(libFilter || undefined))
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Paquetes de modelos por escenario (R12)
+  const pkgStorageId =
+    (storages.find((s) => s.id === pkgStorage) ?? storages[0])?.id ?? ''
+
+  const refreshPkgs = (sid: string) => {
+    if (!sid) return
+    listPackages(sid)
+      .then((d) => setPkgs(d.packages))
+      .catch(() => setPkgs([]))
+  }
+
+  useEffect(() => {
+    refreshPkgs(pkgStorageId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storages, pkgStorage])
+
+  const doAddPkg = async () => {
+    const name = pkgName.trim()
+    if (!name || !pkgStorageId) return
+    // Spec con chars de glob = pattern; lo contrario = archivo exacto.
+    const files = pkgRows
+      .filter((r) => r.repo.trim() && r.spec.trim())
+      .map((r) => {
+        const spec = r.spec.trim()
+        const isGlob = /[*?[\]]/.test(spec)
+        return {
+          repo_id: r.repo.trim(),
+          file: isGlob ? null : spec,
+          pattern: isGlob ? spec : null,
+        }
+      })
+    if (files.length === 0) return
+    setBusy('pkg')
+    setError(null)
+    try {
+      await addPackage(pkgStorageId, {
+        name,
+        scenario: pkgScenario.trim() || null,
+        files,
+      })
+      setPkgName('')
+      setPkgScenario('')
+      setPkgRows([{ repo: '', spec: '' }])
+      setShowAddPkg(false)
+      refreshPkgs(pkgStorageId)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doDeletePkg = async (id: string) => {
+    if (!pkgStorageId) return
+    setBusy('pkg')
+    setError(null)
+    try {
+      await deletePackage(pkgStorageId, id)
+      refreshPkgs(pkgStorageId)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doDownloadPkg = async (id: string) => {
+    if (!pkgStorageId) return
+    setBusy('pkg')
+    setError(null)
+    try {
+      const d = await downloadPackage(pkgStorageId, id)
+      // 1 job por repo único: cada uno se suscribe a su SSE.
+      for (const j of d.jobs) attachJob(j.id, j.repo_id, j.files)
     } catch (e) {
       setError(String(e))
     } finally {
@@ -924,6 +1019,159 @@ export default function App() {
             Ningún archivo de pesos en los storages escaneados
             {lib.errors > 0 ? ` (${lib.errors} errores de acceso)` : ''}.
           </div>
+        )}
+      </section>
+
+      {/* Paquetes de modelos por escenario (R12) */}
+      <section className="panel packages">
+        <h2>Paquetes de modelos</h2>
+        <div className="muted small">
+          Manifiestos de texto plano para descargar un escenario completo en un
+          clic (p. ej. “Escritorio técnico: 3 modelos Q4”). Viven en{' '}
+          <span className="mono">{'<storage>\packajes\'}</span>: editables y
+          copiables entre servers.
+        </div>
+        {storages.length === 0 ? (
+          <div className="muted">
+            Agregá un storage primero (en «Storage y librería»): los paquetes
+            cuelgan de un storage y ahí caen las descargas.
+          </div>
+        ) : (
+          <>
+            <div className="row profilebar">
+              <label className="dest">
+                Storage:
+                <select
+                  name="pkgstorage"
+                  value={pkgStorageId}
+                  onChange={(e) => setPkgStorage(e.target.value)}
+                >
+                  {storages.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button className="mini" onClick={() => setShowAddPkg((v) => !v)}>
+                {showAddPkg ? 'Cerrar' : '+ Agregar paquete'}
+              </button>
+            </div>
+            {showAddPkg && (
+              <div className="addprofile cascade">
+                <div className="row formrow">
+                  <input
+                    placeholder="Nombre (p. ej. escritorio-tecnico)"
+                    value={pkgName}
+                    onChange={(e) => setPkgName(e.target.value)}
+                  />
+                  <input
+                    placeholder="Escenario (p. ej. Escritorio técnico: 3 modelos Q4)"
+                    value={pkgScenario}
+                    onChange={(e) => setPkgScenario(e.target.value)}
+                  />
+                </div>
+                {pkgRows.map((row, i) => (
+                  <div key={i} className="row formrow">
+                    <input
+                      placeholder="repo_id (p. ej. ggml-org/gemma-3-4b-it-GGUF)"
+                      value={row.repo}
+                      onChange={(e) =>
+                        setPkgRows((rs) =>
+                          rs.map((r, j) =>
+                            j === i ? { ...r, repo: e.target.value } : r,
+                          ),
+                        )
+                      }
+                    />
+                    <input
+                      placeholder="archivo exacto O patrón glob (p. ej. *Q4_K_M.gguf)"
+                      value={row.spec}
+                      onChange={(e) =>
+                        setPkgRows((rs) =>
+                          rs.map((r, j) =>
+                            j === i ? { ...r, spec: e.target.value } : r,
+                          ),
+                        )
+                      }
+                    />
+                    <button
+                      className="mini danger"
+                      disabled={pkgRows.length <= 1}
+                      onClick={() =>
+                        setPkgRows((rs) => rs.filter((_, j) => j !== i))
+                      }
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <div className="row formrow">
+                  <button
+                    className="mini"
+                    onClick={() =>
+                      setPkgRows((rs) => [...rs, { repo: '', spec: '' }])
+                    }
+                  >
+                    + entrada
+                  </button>
+                  <button
+                    className="primary"
+                    disabled={
+                      busy === 'pkg' ||
+                      !pkgName.trim() ||
+                      pkgRows.every((r) => !r.repo.trim() || !r.spec.trim())
+                    }
+                    onClick={doAddPkg}
+                  >
+                    {busy === 'pkg' ? 'Guardando…' : 'Guardar'}
+                  </button>
+                </div>
+              </div>
+            )}
+            {pkgs.length > 0 && (
+              <div className="prof-list">
+                {pkgs.map((p) => (
+                  <div key={p.id} className="row prof-row">
+                    <span className="mono muted">{p.id}.json</span>
+                    <b>{p.name}</b>
+                    {p.scenario && <span className="muted">— {p.scenario}</span>}
+                    <span className="muted">
+                      {p.files.length} entradas ·{' '}
+                      {new Set(p.files.map((f) => f.repo_id)).size} repos
+                    </span>
+                    {p.error ? (
+                      <span className="muted" title={p.error}>
+                        ⚠️ {p.error}
+                      </span>
+                    ) : (
+                      <>
+                        <button
+                          className="mini"
+                          disabled={busy === 'pkg'}
+                          onClick={() => doDownloadPkg(p.id)}
+                        >
+                          ⬇ Descargar
+                        </button>
+                        <button
+                          className="mini danger"
+                          disabled={busy === 'pkg'}
+                          onClick={() => doDeletePkg(p.id)}
+                        >
+                          ✕ borrar
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {pkgs.length === 0 && (
+              <div className="muted">
+                Sin paquetes en este storage. Crealo desde acá o tirá un
+                manifiesto .json en la carpeta{' '}
+                <span className="mono">packajes</span>.
+              </div>
+            )}
+          </>
         )}
       </section>
 
