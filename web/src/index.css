@@ -173,6 +173,64 @@ button.mini {
   color: var(--muted);
 }
 
+/* ---------- perfiles de hardware (R10) ---------- */
+.profile-active .hw-name {
+  color: var(--accent);
+}
+
+.profilebar select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 0.9rem;
+}
+
+.profilebar select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.addprofile input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 0.88rem;
+  min-width: 150px;
+}
+
+.addprofile input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.prof-list {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.prof-row {
+  padding: 5px 0;
+}
+
+.prof-row b {
+  font-size: 0.9rem;
+}
+
+button.mini.danger {
+  margin-left: auto;
+  color: var(--no);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+button.mini.danger:hover:not(:disabled) {
+  border-color: var(--no);
+}
+
 /* ---------- búsqueda ---------- */
 .searchbar input {
   flex: 1;

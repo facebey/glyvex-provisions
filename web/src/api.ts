@@ -51,6 +51,29 @@ export interface RepoData {
   rows: FileRow[]
   groups: Group[]
   hardware: Hardware
+  profile?: { id: string; name: string }
+}
+
+// Perfiles de hardware (R10): "local" (auto) + manuales (GPU + RAM declaradas)
+export interface ProfileGpu {
+  name: string
+  vram_gb: number
+}
+
+export interface Profile {
+  id: string
+  name: string
+  kind: 'auto' | 'manual'
+  gpus: ProfileGpu[]
+  ram_gb: number
+  note: string | null
+}
+
+export interface ProfileIn {
+  name: string
+  gpus: ProfileGpu[]
+  ram_gb: number
+  note?: string | null
 }
 
 async function json<T>(r: Response): Promise<T> {
@@ -77,9 +100,33 @@ export const searchModels = (query: string, limit = 20) =>
     body: JSON.stringify({ query, limit }),
   }).then((r) => json<{ models: ModelHit[] }>(r))
 
-export const getRepo = (repoId: string, regime: Regime) =>
-  fetch(`/api/repo/files?repo_id=${encodeURIComponent(repoId)}&regime=${regime}`)
-    .then((r) => json<RepoData>(r))
+export const getRepo = (repoId: string, regime: Regime, profileId?: string) =>
+  fetch(
+    `/api/repo/files?repo_id=${encodeURIComponent(repoId)}&regime=${regime}` +
+      (profileId ? `&profile=${encodeURIComponent(profileId)}` : ''),
+  ).then((r) => json<RepoData>(r))
+
+export const listProfiles = () =>
+  fetch('/api/profiles').then((r) => json<{ profiles: Profile[] }>(r))
+
+export const addProfile = (body: ProfileIn) =>
+  fetch('/api/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Profile>(r))
+
+export const updateProfile = (id: string, body: ProfileIn) =>
+  fetch(`/api/profiles/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Profile>(r))
+
+export const deleteProfile = (id: string) =>
+  fetch(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(
+    (r) => json<{ ok: boolean }>(r),
+  )
 
 export const submitDownload = (repoId: string, files: string[], dest?: string) =>
   fetch('/api/downloads', {

@@ -4,12 +4,16 @@ import {
   type Hardware,
   type JobEvent,
   type ModelHit,
+  type Profile,
   type Regime,
   type RepoData,
+  addProfile,
+  deleteProfile,
   fmtBytes,
   getHardware,
   getRepo,
   listDownloads,
+  listProfiles,
   openJobEvents,
   searchModels,
   submitDownload,
@@ -45,6 +49,14 @@ export default function App() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dest, setDest] = useState<string>('D:\\Downloads')
   const [jobs, setJobs] = useState<JobView[]>([])
+  // Perfiles de hardware (R10): "local" (auto) + manuales
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [profileId, setProfileId] = useState<string>('local')
+  const [showAddProfile, setShowAddProfile] = useState(false)
+  const [pName, setPName] = useState('')
+  const [pGpu, setPGpu] = useState('')
+  const [pVram, setPVram] = useState('')
+  const [pRam, setPRam] = useState('')
   const eventsRef = useRef<Map<string, EventSource>>(new Map())
 
   const closeJob = useCallback((id: string) => {
@@ -113,6 +125,9 @@ export default function App() {
     }).catch(() =>
       setError('No se pudo conectar con el backend (¿uvicorn corriendo en 8321?).'),
     )
+    listProfiles().then((d) => setProfiles(d.profiles)).catch(() => {
+      /* backend caído: ya se muestra el error del hardware */
+    })
     listDownloads()
       .then((d) => {
         for (const j of d.jobs) {
@@ -148,7 +163,7 @@ export default function App() {
     setRepo(null)
     setSelected(new Set())
     try {
-      const d = await getRepo(repoId, regime)
+      const d = await getRepo(repoId, regime, profileId)
       setRepo(d)
     } catch (e) {
       setError(String(e))
@@ -157,15 +172,54 @@ export default function App() {
     }
   }
 
-  // Si cambia el régimen, re-calcular la tabla del repo abierto
+  // Si cambia el régimen o el perfil, re-calcular la tabla del repo abierto
   useEffect(() => {
     if (repo) {
-      getRepo(repo.repo_id, regime)
+      getRepo(repo.repo_id, regime, profileId)
         .then(setRepo)
         .catch(() => {})
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [regime])
+  }, [regime, profileId])
+
+  const doAddProfile = async () => {
+    const name = pName.trim()
+    const vram = parseFloat(pVram)
+    const ram = parseFloat(pRam)
+    if (!name || !Number.isFinite(vram) || vram <= 0 ||
+        !Number.isFinite(ram) || ram <= 0) return
+    setBusy('profile')
+    setError(null)
+    try {
+      const gpus = pGpu.trim() ? [{ name: pGpu.trim(), vram_gb: vram }] : []
+      const p = await addProfile({ name, gpus, ram_gb: ram })
+      setProfiles((ps) => [...ps, p])
+      setProfileId(p.id)
+      setPName('')
+      setPGpu('')
+      setPVram('')
+      setPRam('')
+      setShowAddProfile(false)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doDeleteProfile = async (id: string) => {
+    setBusy('profile')
+    setError(null)
+    try {
+      await deleteProfile(id)
+      setProfiles((ps) => ps.filter((p) => p.id !== id))
+      if (profileId === id) setProfileId('local')
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const toggle = (path: string) => {
     setSelected((s) => {
@@ -227,6 +281,8 @@ export default function App() {
   }
 
   const gpus = hw?.gpus ?? []
+  const activeProfile = profiles.find((p) => p.id === profileId) ?? null
+  const manualProfiles = profiles.filter((p) => p.kind === 'manual')
 
   return (
     <div className="app">
@@ -248,26 +304,76 @@ export default function App() {
         </div>
       </header>
 
-      {/* Panel de hardware */}
+      {/* Panel de hardware: el perfil elegido (local auto o manual) */}
       <section className="panel hw">
-        {hw ? (
+        {profileId === 'local' ? (
+          hw ? (
+            <>
+              {gpus.map((g) => (
+                <div key={g.index} className="hw-item">
+                  <span className="hw-icon">🎮</span>
+                  <div>
+                    <div className="hw-name">{g.name}</div>
+                    <div className="hw-meta">
+                      VRAM {fmtBytes(g.vram_total_bytes)} · libre {fmtBytes(g.vram_free_bytes)} · driver {g.driver}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {gpus.length === 0 && (
+                <div className="hw-item">
+                  <span className="hw-icon">⚠️</span>
+                  <div>
+                    <div className="hw-name">Sin GPU NVIDIA detectada</div>
+                    <div className="hw-meta">usa el régimen CPU / Offload</div>
+                  </div>
+                </div>
+              )}
+              <div className="hw-item">
+                <span className="hw-icon">🧠</span>
+                <div>
+                  <div className="hw-name">RAM {fmtBytes(hw.ram_total_bytes)}</div>
+                  <div className="hw-meta">{hw.cpu_cores} núcleos de CPU</div>
+                </div>
+              </div>
+              <div className="hw-item">
+                <span className="hw-icon">💾</span>
+                <div>
+                  <div className="hw-name">Disco: {fmtBytes(hw.disk_free_bytes)} libres</div>
+                  <div className="hw-meta">descargas → {hw.downloads_dir}</div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="hw-item">
+              <div className="hw-meta">{error ?? 'Leyendo hardware…'}</div>
+            </div>
+          )
+        ) : activeProfile ? (
           <>
-            {gpus.map((g) => (
-              <div key={g.index} className="hw-item">
+            <div className="hw-item profile-active">
+              <span className="hw-icon">🎛️</span>
+              <div>
+                <div className="hw-name">Semáforo contra: {activeProfile.name}</div>
+                <div className="hw-meta">
+                  perfil manual — declarás lo que tiene el server (la app no se conecta a él)
+                </div>
+              </div>
+            </div>
+            {activeProfile.gpus.map((g, i) => (
+              <div key={i} className="hw-item">
                 <span className="hw-icon">🎮</span>
                 <div>
                   <div className="hw-name">{g.name}</div>
-                  <div className="hw-meta">
-                    VRAM {fmtBytes(g.vram_total_bytes)} · libre {fmtBytes(g.vram_free_bytes)} · driver {g.driver}
-                  </div>
+                  <div className="hw-meta">VRAM {g.vram_gb} GB</div>
                 </div>
               </div>
             ))}
-            {gpus.length === 0 && (
+            {activeProfile.gpus.length === 0 && (
               <div className="hw-item">
                 <span className="hw-icon">⚠️</span>
                 <div>
-                  <div className="hw-name">Sin GPU NVIDIA detectada</div>
+                  <div className="hw-name">Sin GPU declarada</div>
                   <div className="hw-meta">usa el régimen CPU / Offload</div>
                 </div>
               </div>
@@ -275,21 +381,90 @@ export default function App() {
             <div className="hw-item">
               <span className="hw-icon">🧠</span>
               <div>
-                <div className="hw-name">RAM {fmtBytes(hw.ram_total_bytes)}</div>
-                <div className="hw-meta">{hw.cpu_cores} núcleos de CPU</div>
-              </div>
-            </div>
-            <div className="hw-item">
-              <span className="hw-icon">💾</span>
-              <div>
-                <div className="hw-name">Disco: {fmtBytes(hw.disk_free_bytes)} libres</div>
-                <div className="hw-meta">descargas → {hw.downloads_dir}</div>
+                <div className="hw-name">RAM {activeProfile.ram_gb} GB</div>
+                <div className="hw-meta">declarada manualmente</div>
               </div>
             </div>
           </>
         ) : (
           <div className="hw-item">
-            <div className="hw-meta">{error ?? 'Leyendo hardware…'}</div>
+            <div className="hw-meta">Cargando perfiles…</div>
+          </div>
+        )}
+      </section>
+
+      {/* Perfiles de hardware (R10) */}
+      <section className="panel profiles">
+        <div className="row profilebar">
+          <span className="muted">Perfil de hardware:</span>
+          <select
+            name="profile"
+            value={profileId}
+            onChange={(e) => setProfileId(e.target.value)}
+          >
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <button
+            className="mini"
+            onClick={() => setShowAddProfile((v) => !v)}
+          >
+            {showAddProfile ? 'Cerrar' : '+ Agregar perfil (otro server)'}
+          </button>
+        </div>
+        {showAddProfile && (
+          <div className="row addprofile">
+            <input
+              placeholder="Nombre (p. ej. Server-01)"
+              value={pName}
+              onChange={(e) => setPName(e.target.value)}
+            />
+            <input
+              placeholder="GPU (p. ej. RTX 4090; vacío si no tiene)"
+              value={pGpu}
+              onChange={(e) => setPGpu(e.target.value)}
+            />
+            <input
+              type="number" min="0.5" step="0.5" placeholder="VRAM GB"
+              value={pVram}
+              onChange={(e) => setPVram(e.target.value)}
+            />
+            <input
+              type="number" min="1" step="1" placeholder="RAM GB"
+              value={pRam}
+              onChange={(e) => setPRam(e.target.value)}
+            />
+            <button
+              className="primary"
+              disabled={busy === 'profile' || !pName.trim()}
+              onClick={doAddProfile}
+            >
+              {busy === 'profile' ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        )}
+        {manualProfiles.length > 0 && (
+          <div className="prof-list">
+            {manualProfiles.map((p) => (
+              <div key={p.id} className="row prof-row">
+                <span className="mono muted">{p.id}</span>
+                <b>{p.name}</b>
+                <span className="muted">
+                  {p.gpus.length > 0
+                    ? p.gpus.map((g) => `${g.name} ${g.vram_gb} GB`).join(', ')
+                    : 'sin GPU'}
+                  {' · '}RAM {p.ram_gb} GB
+                </span>
+                <button
+                  className="mini danger"
+                  disabled={busy === 'profile'}
+                  onClick={() => doDeleteProfile(p.id)}
+                >
+                  ✕ borrar
+                </button>
+              </div>
+            ))}
           </div>
         )}
       </section>
@@ -348,7 +523,11 @@ export default function App() {
           <div className="row repohead">
             <div>
               <span className="mono repo-id">{repo.repo_id}</span>
-              <span className="muted"> — {repo.rows.length} archivos de pesos (régimen: {REGIME_LABELS[regime]})</span>
+              <span className="muted">
+                {' — '}
+                {repo.rows.length} archivos de pesos · régimen: {REGIME_LABELS[regime]}
+                {repo.profile ? ` · perfil: ${repo.profile.name}` : ''}
+              </span>
             </div>
             <div className="row totals">
               <span>

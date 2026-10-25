@@ -31,8 +31,8 @@ def estimate(size_bytes: int, regime: str, hw: dict) -> dict:
     needed = int(size_bytes * OVERHEAD)
     cap = capacity_bytes(regime, hw)
     if cap <= 0:
-        detail = ("no se detectó GPU NVIDIA" if regime == "gpu"
-                  else "sin datos de RAM")
+        detail = ("el perfil no tiene GPU" if regime == "gpu"
+                  else "el perfil no tiene RAM")
         return {"needed_bytes": needed, "capacity_bytes": 0,
                 "ratio": None, "status": "no", "detail": detail}
     ratio = needed / cap

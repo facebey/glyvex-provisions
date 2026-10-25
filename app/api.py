@@ -18,6 +18,7 @@ from hf_down import (MMPROJ_RE, MTP_RE, QUANT_RE, SUPPORT_EXTS,
 
 from . import downloads as dl
 from . import fit, hfsearch
+from . import profiles
 from .hardware import detect
 
 router = APIRouter(prefix="/api")
@@ -63,16 +64,57 @@ def hardware() -> dict:
     return detect()
 
 
+# ---- Perfiles de hardware (R10): "local" (auto) + manuales -----------------
+
+@router.get("/profiles")
+def list_profiles() -> dict:
+    return {"profiles": profiles.list_profiles()}
+
+
+@router.post("/profiles", status_code=201)
+def create_profile(body: profiles.ProfileIn) -> dict:
+    try:
+        return profiles.add_profile(body)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from None
+
+
+@router.put("/profiles/{profile_id}")
+def update_profile(profile_id: str, body: profiles.ProfileIn) -> dict:
+    if profile_id == profiles.AUTO_ID:
+        raise HTTPException(409, "el perfil auto (local) no se edita")
+    try:
+        p = profiles.update_profile(profile_id, body)
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from None
+    if not p:
+        raise HTTPException(404, f"perfil inexistente: {profile_id}")
+    return p
+
+
+@router.delete("/profiles/{profile_id}")
+def delete_profile(profile_id: str) -> dict:
+    if profile_id == profiles.AUTO_ID:
+        raise HTTPException(409, "el perfil auto (local) no se borra")
+    if not profiles.delete_profile(profile_id):
+        raise HTTPException(404, f"perfil inexistente: {profile_id}")
+    return {"ok": True}
+
+
 @router.post("/search")
 def search(body: SearchReq) -> dict:
     return {"models": hfsearch.search_models(body.query, body.limit)}
 
 
 @router.get("/repo/files")
-def repo_files(repo_id: str, regime: str = "gpu") -> dict:
+def repo_files(repo_id: str, regime: str = "gpu", profile: str = "local") -> dict:
     if regime not in fit.REGIMES:
         raise HTTPException(422, f"regimén inválido: {regime!r} "
                                  f"(usa {', '.join(fit.REGIMES)})")
+    # Perfil primero (check local, sin red): 404 determinista antes de llamar a HF.
+    prof = profiles.get_profile(profile)
+    if prof is None:
+        raise HTTPException(404, f"perfil inexistente: {profile}")
     try:
         data = hfsearch.repo_files(repo_id)
     except hfsearch.GatedError:
@@ -81,7 +123,7 @@ def repo_files(repo_id: str, regime: str = "gpu") -> dict:
             "Repo gated/privado: acepta los términos en huggingface.co y "
             "define HF_TOKEN (o ejecuta `hf auth login`).",
         ) from None
-    hw = detect()
+    hw = profiles.caps_for(profile)
     rows = []
     aux = []
     for f in data["files"]:
@@ -100,7 +142,8 @@ def repo_files(repo_id: str, regime: str = "gpu") -> dict:
                             r["label"] != "Config / soporte", r["path"]))
     rows.extend(aux)
     return {"repo_id": repo_id, "rows": rows, "groups": data["groups"],
-            "hardware": hw}
+            "hardware": hw,
+            "profile": {"id": prof["id"], "name": prof["name"]}}
 
 
 def _validate_dest(dest: str | None) -> Path:
