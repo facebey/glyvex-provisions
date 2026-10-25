@@ -630,7 +630,7 @@ export default function App() {
                   <div>
                     <div className="hw-name">{g.name}</div>
                     <div className="hw-meta">
-                      {g.vendor.toUpperCase()} ·{' '}
+                      {g.vendor ? `${g.vendor.toUpperCase()} · ` : ''}
                       {g.shared_memory
                         ? 'memoria compartida (sin VRAM dedicada)'
                         : `VRAM ${fmtBytes(g.vram_total_bytes)} · libre ${fmtBytes(g.vram_free_bytes)}`}
@@ -1028,7 +1028,7 @@ export default function App() {
         <div className="muted small">
           Manifiestos de texto plano para descargar un escenario completo en un
           clic (p. ej. “Escritorio técnico: 3 modelos Q4”). Viven en{' '}
-          <span className="mono">{'<storage>\packajes\'}</span>: editables y
+          <span className="mono">{'<storage>\\packajes\\'}</span>: editables y
           copiables entre servers.
         </div>
         {storages.length === 0 ? (
