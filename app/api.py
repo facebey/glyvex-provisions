@@ -19,6 +19,7 @@ from hf_down import (MMPROJ_RE, MTP_RE, QUANT_RE, SUPPORT_EXTS,
 from . import downloads as dl
 from . import fit, hfsearch
 from . import profiles
+from . import storage
 from .hardware import detect
 
 router = APIRouter(prefix="/api")
@@ -99,6 +100,47 @@ def delete_profile(profile_id: str) -> dict:
     if not profiles.delete_profile(profile_id):
         raise HTTPException(404, f"perfil inexistente: {profile_id}")
     return {"ok": True}
+
+
+# ---- Storage multi-path (R11) + librería local (R9) -------------------------
+
+@router.get("/storage")
+def list_storages() -> dict:
+    return {"storages": storage.list_storages()}
+
+
+@router.post("/storage", status_code=201)
+def create_storage(body: storage.StorageIn) -> dict:
+    try:
+        return storage.add_storage(body)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+
+
+@router.put("/storage/{storage_id}")
+def update_storage(storage_id: str, body: storage.StorageIn) -> dict:
+    try:
+        s = storage.update_storage(storage_id, body)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    if not s:
+        raise HTTPException(404, f"storage inexistente: {storage_id}")
+    return s
+
+
+@router.delete("/storage/{storage_id}")
+def delete_storage(storage_id: str) -> dict:
+    if not storage.delete_storage(storage_id):
+        raise HTTPException(404, f"storage inexistente: {storage_id}")
+    return {"ok": True}
+
+
+@router.get("/library")
+def library(storage_id: str | None = None) -> dict:
+    """Librería local: escaneo recursivo de los paths de storage (R9)."""
+    if storage_id is not None and storage.get_storage(storage_id) is None:
+        raise HTTPException(404, f"storage inexistente: {storage_id}")
+    return storage.scan_library(storage_id)
 
 
 @router.post("/search")

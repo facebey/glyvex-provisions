@@ -3,17 +3,24 @@ import {
   type FileRow,
   type Hardware,
   type JobEvent,
+  type LibModel,
+  type LibraryData,
   type ModelHit,
   type Profile,
   type Regime,
   type RepoData,
+  type Storage,
   addProfile,
+  addStorage,
   deleteProfile,
+  deleteStorage,
   fmtBytes,
   getHardware,
+  getLibrary,
   getRepo,
   listDownloads,
   listProfiles,
+  listStorages,
   openJobEvents,
   searchModels,
   submitDownload,
@@ -57,6 +64,13 @@ export default function App() {
   const [pGpu, setPGpu] = useState('')
   const [pVram, setPVram] = useState('')
   const [pRam, setPRam] = useState('')
+  // Storage multi-path (R11) + librería local (R9)
+  const [storages, setStorages] = useState<Storage[]>([])
+  const [showAddStorage, setShowAddStorage] = useState(false)
+  const [stName, setStName] = useState('')
+  const [stPath, setStPath] = useState('')
+  const [lib, setLib] = useState<LibraryData | null>(null)
+  const [libFilter, setLibFilter] = useState<string>('') // '' = todos
   const eventsRef = useRef<Map<string, EventSource>>(new Map())
 
   const closeJob = useCallback((id: string) => {
@@ -126,6 +140,9 @@ export default function App() {
       setError('No se pudo conectar con el backend (¿uvicorn corriendo en 8321?).'),
     )
     listProfiles().then((d) => setProfiles(d.profiles)).catch(() => {
+      /* backend caído: ya se muestra el error del hardware */
+    })
+    listStorages().then((d) => setStorages(d.storages)).catch(() => {
       /* backend caído: ya se muestra el error del hardware */
     })
     listDownloads()
@@ -220,6 +237,58 @@ export default function App() {
       setBusy(null)
     }
   }
+
+  const doAddStorage = async () => {
+    const name = stName.trim()
+    const path = stPath.trim()
+    if (!name || !path) return
+    setBusy('storage')
+    setError(null)
+    try {
+      const s = await addStorage({ name, path })
+      setStorages((ss) => [...ss, s])
+      setStName('')
+      setStPath('')
+      setShowAddStorage(false)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doDeleteStorage = async (id: string) => {
+    setBusy('storage')
+    setError(null)
+    try {
+      await deleteStorage(id)
+      setStorages((ss) => ss.filter((s) => s.id !== id))
+      if (libFilter === id) setLibFilter('')
+      if (lib) setLib(null) // la librería mostrada ya no es válida
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doScanLibrary = async () => {
+    setBusy('lib')
+    setError(null)
+    try {
+      setLib(await getLibrary(libFilter || undefined))
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const libModels: LibModel[] = lib
+    ? libFilter
+      ? lib.models.filter((m) => m.storage_id === libFilter)
+      : lib.models
+    : []
 
   const toggle = (path: string) => {
     setSelected((s) => {
@@ -465,6 +534,131 @@ export default function App() {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      {/* Storage y librería local (R11 / R9) */}
+      <section className="panel storage">
+        <h2>Storage y librería</h2>
+        <div className="row profilebar">
+          <span className="muted">Paths de storage (destino de descargas + base de la librería):</span>
+          <button className="mini" onClick={() => setShowAddStorage((v) => !v)}>
+            {showAddStorage ? 'Cerrar' : '+ Agregar storage'}
+          </button>
+        </div>
+        {showAddStorage && (
+          <div className="row addprofile">
+            <input
+              placeholder="Nombre (p. ej. NAS-01)"
+              value={stName}
+              onChange={(e) => setStName(e.target.value)}
+            />
+            <input
+              placeholder="Ruta (G:\LLM, C:\LLM, \\NAS\compartido…)"
+              value={stPath}
+              onChange={(e) => setStPath(e.target.value)}
+              className="st-path"
+            />
+            <button
+              className="primary"
+              disabled={busy === 'storage' || !stName.trim() || !stPath.trim()}
+              onClick={doAddStorage}
+            >
+              {busy === 'storage' ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        )}
+        {storages.length > 0 && (
+          <div className="prof-list">
+            {storages.map((s) => (
+              <div key={s.id} className="row prof-row">
+                <span className="mono muted">{s.id}</span>
+                <b>{s.name}</b>
+                <span className="mono muted" title={s.path}>{s.path}</span>
+                <button
+                  className="mini danger"
+                  disabled={busy === 'storage'}
+                  onClick={() => doDeleteStorage(s.id)}
+                >
+                  ✕ borrar
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {storages.length === 0 && !showAddStorage && (
+          <div className="muted">
+            Sin storages. Agregá al menos uno (p. ej. <span className="mono">D:\LLM</span>)
+            para escanear la librería; las descargas apuntarán a uno de estos paths.
+          </div>
+        )}
+
+        {storages.length > 0 && (
+          <div className="row libbar">
+            <button
+              onClick={doScanLibrary}
+              disabled={busy === 'lib' || storages.length === 0}
+            >
+              {busy === 'lib' ? 'Escaneando…' : '🔍 Escanear librería'}
+            </button>
+            <label className="dest">
+              Storage:
+              <select
+                name="libfilter"
+                value={libFilter}
+                onChange={(e) => { setLibFilter(e.target.value); setLib(null) }}
+              >
+                <option value="">Todos</option>
+                {storages.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </label>
+            {lib && (
+              <span className="muted">
+                {libModels.length} modelos · {lib.files} pesos · {lib.scanned_dirs} carpetas
+                {lib.errors > 0 && ` · ${lib.errors} errores de acceso`}
+                {lib.truncated && ' · (truncado)'}
+              </span>
+            )}
+          </div>
+        )}
+        {lib && libModels.length > 0 && (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Modelo</th>
+                <th>Storage</th>
+                <th>Cuantizaciones</th>
+                <th className="num">Tamaño</th>
+              </tr>
+            </thead>
+            <tbody>
+              {libModels.map((m) => (
+                <tr key={`${m.storage_id}:${m.model_dir}`}>
+                  <td>
+                    <b>{m.name}</b>
+                    <div className="mono small" title={m.model_dir}>{m.model_dir}</div>
+                  </td>
+                  <td className="muted">{m.storage_name}</td>
+                  <td>
+                    <div className="row" style={{ gap: 4 }}>
+                      {m.quants.map((q) => (
+                        <span key={q} className="chip tiny" style={{ cursor: 'default' }}>{q}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="num">{fmtBytes(m.total_bytes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {lib && libModels.length === 0 && (
+          <div className="muted">
+            Ningún archivo de pesos en los storages escaneados
+            {lib.errors > 0 ? ` (${lib.errors} errores de acceso)` : ''}.
           </div>
         )}
       </section>

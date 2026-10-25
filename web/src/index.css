@@ -231,6 +231,32 @@ button.mini.danger:hover:not(:disabled) {
   border-color: var(--no);
 }
 
+/* ---------- storage y librería (R11 / R9) ---------- */
+.addprofile input.st-path {
+  flex: 1;
+  min-width: 220px;
+}
+
+.libbar {
+  margin-top: 14px;
+  align-items: center;
+}
+
+.libbar label.dest select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 0.88rem;
+  margin-left: 6px;
+}
+
+.libbar label.dest select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* ---------- búsqueda ---------- */
 .searchbar input {
   flex: 1;

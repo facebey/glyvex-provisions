@@ -76,6 +76,46 @@ export interface ProfileIn {
   note?: string | null
 }
 
+// Storage multi-path (R11) + librería local (R9)
+export interface Storage {
+  id: string
+  name: string
+  path: string
+  note: string | null
+}
+
+export interface StorageIn {
+  name: string
+  path: string
+  note?: string | null
+}
+
+export interface LibFile {
+  path: string
+  size: number
+  ext: string
+  label: string
+}
+
+export interface LibModel {
+  storage_id: string
+  storage_name: string
+  model_dir: string
+  name: string
+  files: LibFile[]
+  total_bytes: number
+  quants: string[]
+}
+
+export interface LibraryData {
+  models: LibModel[]
+  scanned_storages: number
+  scanned_dirs: number
+  files: number
+  errors: number
+  truncated: boolean
+}
+
 async function json<T>(r: Response): Promise<T> {
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`
@@ -127,6 +167,34 @@ export const deleteProfile = (id: string) =>
   fetch(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(
     (r) => json<{ ok: boolean }>(r),
   )
+
+export const listStorages = () =>
+  fetch('/api/storage').then((r) => json<{ storages: Storage[] }>(r))
+
+export const addStorage = (body: StorageIn) =>
+  fetch('/api/storage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Storage>(r))
+
+export const updateStorage = (id: string, body: StorageIn) =>
+  fetch(`/api/storage/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Storage>(r))
+
+export const deleteStorage = (id: string) =>
+  fetch(`/api/storage/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(
+    (r) => json<{ ok: boolean }>(r),
+  )
+
+export const getLibrary = (storageId?: string) =>
+  fetch(
+    '/api/library' +
+      (storageId ? `?storage_id=${encodeURIComponent(storageId)}` : ''),
+  ).then((r) => json<LibraryData>(r))
 
 export const submitDownload = (repoId: string, files: string[], dest?: string) =>
   fetch('/api/downloads', {
