@@ -1,4 +1,4 @@
-"""Endpoints REST + SSE de model-pilot (fase 1 / MVP).
+"""Endpoints REST + SSE de Glyvex Provisions (fase 1 / MVP).
 
 Todo se sirve en 127.0.0.1 (lo garantiza el launch de uvicorn). El frontend
 (Vite :5173) usa proxy de /api hacia este backend, así que no hay CORS.

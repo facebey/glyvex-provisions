@@ -1,4 +1,9 @@
-# model-pilot
+# Glyvex Provisions
+
+Tool externa de **Glyvex-AI-Suite**: la única pieza del stack que se conecta a
+internet (búsqueda y descarga de modelos en Hugging Face). La Suite se queda
+100% local; esta tool se instala opcionalmente (o como fase previa, para
+provisionar el storage de modelos antes de usar la Suite).
 
 APP local (solo `127.0.0.1`) que detecta tu hardware (GPU + VRAM, RAM, disco),
 te muestra qué modelos y cuantizaciones de [Hugging Face](https://huggingface.co)
