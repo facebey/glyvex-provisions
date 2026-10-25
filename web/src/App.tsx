@@ -43,6 +43,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [repo, setRepo] = useState<RepoData | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [dest, setDest] = useState<string>('D:\\Downloads')
   const [jobs, setJobs] = useState<JobView[]>([])
   const eventsRef = useRef<Map<string, EventSource>>(new Map())
 
@@ -106,7 +107,10 @@ export default function App() {
 
   // Carga inicial: hardware + jobs activos en el servidor (re-suscripción)
   useEffect(() => {
-    getHardware().then(setHw).catch(() =>
+    getHardware().then((h) => {
+      setHw(h)
+      setDest(h.downloads_dir)
+    }).catch(() =>
       setError('No se pudo conectar con el backend (¿uvicorn corriendo en 8321?).'),
     )
     listDownloads()
@@ -196,7 +200,7 @@ export default function App() {
     setError(null)
     try {
       const files = repo.rows.filter((r) => selected.has(r.path)).map((r) => r.path)
-      const d = await submitDownload(repo.repo_id, files)
+      const d = await submitDownload(repo.repo_id, files, dest)
       // total de bytes para la barra de progreso
       setJobs((js) =>
         [
@@ -350,6 +354,15 @@ export default function App() {
               <span>
                 Seleccionado: <b>{selected.size}</b> archivos · <b>{fmtBytes(selectedBytes)}</b>
               </span>
+              <label className="dest">
+                Destino:
+                <input
+                  name="dest"
+                  value={dest}
+                  onChange={(e) => setDest(e.target.value)}
+                  placeholder="D:\Downloads"
+                />
+              </label>
               <button
                 className="primary"
                 disabled={selected.size === 0 || busy === 'dl'}
@@ -395,10 +408,14 @@ export default function App() {
                   <td className="num">{fmtBytes(r.size)}</td>
                   <td className="num muted">{fmtBytes(r.needed_bytes)}</td>
                   <td>
-                    <span className={`dot ${r.status}`}
-                          title={r.detail ?? `ratio ${(r.ratio ?? 0).toFixed(2)}`}>
-                      ● {r.status}
-                    </span>
+                    {r.status === 'na' ? (
+                      <span className="dot na" title={r.detail}>—</span>
+                    ) : (
+                      <span className={`dot ${r.status}`}
+                            title={r.detail ?? `ratio ${(r.ratio ?? 0).toFixed(2)}`}>
+                        ● {r.status}
+                      </span>
+                    )}
                   </td>
                   <td className="mono small" title={r.path}>
                     {r.path.split('/').pop()}

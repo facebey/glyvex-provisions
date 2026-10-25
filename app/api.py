@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import json
 import queue
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from hf_down import MMPROJ_RE, MTP_RE, QUANT_RE, WEIGHT_EXTS
+from hf_down import (MMPROJ_RE, MTP_RE, QUANT_RE, SUPPORT_EXTS,
+                     SUPPORT_MAX_SIZE, WEIGHT_EXTS)
 
 from . import downloads as dl
 from . import fit, hfsearch
@@ -29,10 +31,11 @@ class SearchReq(BaseModel):
 class DownloadReq(BaseModel):
     repo_id: str
     files: list[str]
+    dest: str | None = None  # None -> D:\Downloads (default)
 
 
 def _file_label(path: str) -> str:
-    """Etiqueta por archivo, con las MISMAS reglas que el core
+    """Etiqueta de ARCHIVOS DE PESOS, con las MISMAS reglas que el core
     (mmproj/MTP antes que la cuantización)."""
     base = path.rsplit("/", 1)[-1]
     if MMPROJ_RE.search(base):
@@ -42,6 +45,17 @@ def _file_label(path: str) -> str:
         return f"MTP (opcional){' ' + m.group(1).upper() if m else ''}"
     m = QUANT_RE.search(path)
     return m.group(1).upper() if m else "(sin etiqueta)"
+
+
+def _aux_label(path: str, ext: str, size: int) -> str:
+    """Etiqueta de archivos no-peso (model card, config, otros).
+    Mismas categorías que el core (README, soporte <=1 MB, resto)."""
+    base = path.rsplit("/", 1)[-1]
+    if base.lower() == "readme.md":
+        return "Model card"
+    if ext in SUPPORT_EXTS and size <= SUPPORT_MAX_SIZE:
+        return "Config / soporte"
+    return "Otros archivos"
 
 
 @router.get("/hardware")
@@ -69,20 +83,43 @@ def repo_files(repo_id: str, regime: str = "gpu") -> dict:
         ) from None
     hw = detect()
     rows = []
+    aux = []
     for f in data["files"]:
-        if f["ext"] not in WEIGHT_EXTS:
-            continue
-        rows.append({"path": f["path"], "label": _file_label(f["path"]),
-                     "size": f["size"], **fit.estimate(f["size"], regime, hw)})
+        if f["ext"] in WEIGHT_EXTS:
+            rows.append({"path": f["path"], "label": _file_label(f["path"]),
+                         "size": f["size"],
+                         **fit.estimate(f["size"], regime, hw)})
+        else:
+            # No-peso: se lista (model card, config, otros) pero sin semáforo.
+            aux.append({"path": f["path"], "label": _aux_label(
+                f["path"], f["ext"], f["size"]), "size": f["size"],
+                "needed_bytes": 0, "capacity_bytes": 0, "ratio": None,
+                "status": "na", "detail": "no es un peso (sin semáforo)"})
+    # Model card primero, luego config/soporte, luego el resto.
+    aux.sort(key=lambda r: (r["label"] != "Model card",
+                            r["label"] != "Config / soporte", r["path"]))
+    rows.extend(aux)
     return {"repo_id": repo_id, "rows": rows, "groups": data["groups"],
             "hardware": hw}
+
+
+def _validate_dest(dest: str | None) -> Path:
+    if dest is None or not dest.strip():
+        return dl.DEFAULT_DEST
+    p = Path(dest.strip())
+    if not p.is_absolute():
+        raise HTTPException(422, f"destino no absoluto: {dest!r}")
+    if not p.is_dir():
+        raise HTTPException(422, f"directorio no existe: {p}")
+    return p
 
 
 @router.post("/downloads")
 def start_download(body: DownloadReq) -> dict:
     if not body.files:
         raise HTTPException(422, "selección vacía")
-    job = dl.manager.submit(body.repo_id, body.files)
+    dest = _validate_dest(body.dest)
+    job = dl.manager.submit(body.repo_id, body.files, dest=dest)
     return {"id": job.id}
 
 
