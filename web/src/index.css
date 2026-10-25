@@ -290,6 +290,35 @@ button.mini {
   color: var(--no);
 }
 
+.dot.na {
+  color: var(--muted);
+}
+
+/* ---------- input de destino ---------- */
+.dest {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.dest input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 5px 10px;
+  font-size: 0.85rem;
+  font-family: ui-monospace, Consolas, monospace;
+  width: 220px;
+}
+
+.dest input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /* ---------- banner de error ---------- */
 .banner {
   border-radius: 8px;

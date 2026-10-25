@@ -2,7 +2,7 @@
 // Solo se usa contra localhost; sin telemetría.
 
 export type Regime = 'gpu' | 'offload' | 'cpu'
-export type FitStatus = 'ok' | 'tight' | 'no'
+export type FitStatus = 'ok' | 'tight' | 'no' | 'na'
 
 export interface Gpu {
   index: number
@@ -81,11 +81,11 @@ export const getRepo = (repoId: string, regime: Regime) =>
   fetch(`/api/repo/files?repo_id=${encodeURIComponent(repoId)}&regime=${regime}`)
     .then((r) => json<RepoData>(r))
 
-export const submitDownload = (repoId: string, files: string[]) =>
+export const submitDownload = (repoId: string, files: string[], dest?: string) =>
   fetch('/api/downloads', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repo_id: repoId, files }),
+    body: JSON.stringify({ repo_id: repoId, files, dest: dest || undefined }),
   }).then((r) => json<{ id: string }>(r))
 
 export const listDownloads = () =>
