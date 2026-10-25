@@ -15,7 +15,12 @@ export default defineConfig({
     port: 8331,
     strictPort: true,
     proxy: {
-      '/api': 'http://127.0.0.1:8321',
+      // El backend puede no quedar en 8321: si esa base estaba ocupada, su
+      // escalera (8321..8330) lo asienta en 8322, 8323, ... El arrancador
+      // (start.ps1) descubre el puerto real con /api/healthz y lo inyecta por
+      // PROV_BACKEND_URL; sin la variable, 8321 sigue siendo el valor por
+      // defecto (arranque manual directo de `npm run dev`).
+      '/api': process.env.PROV_BACKEND_URL || 'http://127.0.0.1:8321',
     },
   },
 })
