@@ -123,7 +123,7 @@ si Fabian prefiere mantenerse 100% Python y arrancar el MVP en horas.
 | 4b | (Adición UI 2026-10-25) Checkbox select-all en la tabla de archivos del repo | ✅ `5403170` |
 | 4c | (Adición 2026-10-25) Detección de hardware completa: CPU (modelo, vendor, relojes, socket), GPU multi-vendor (NVIDIA/AMD/Intel), RAM por módulo (tipo, velocidad, fabricante) | ✅ `dd578b9` |
 | 4d | (Adición 2026-10-25) Catálogo de hardware (`app/catalog.json`: CPUs Intel/AMD 2015→hoy, GPUs 3 vendors con VRAM mapeada, velocidades RAM DDR3/4/5) + perfil manual con **selects en cascada** (vendor → modelo, VRAM autofillada y editable, "Otro… (manual)" por campo) + **detección auto enriquecida** con el catálogo (`vram_source`: nvidia-smi/wmi/catalog — corrige el cap de ~4 GB de WMI en GPUs no-NVIDIA; reloj de CPU por fallback) | ✅ `82e6ad5` |
-| 5 | Paquetes de modelos por escenario (R12) | pendiente |
+| 5 | Paquetes de modelos por escenario (R12): manifiestos `.json` en `<storage>\packajes\` (texto plano, portables entre servers), entradas `{repo_id, file}` exacto o `{repo_id, pattern}` glob con XOR, descarga = 1 job por repo único | ✅ `cd24d19` |
 | 6 | Pausa/reintento + ajustes (contexto, umbrales, margen) + estimación v2 por metadatos GGUF | pendiente |
 | 7 | **Instalador Tauri/NSIS** para Glyvex Provisions (distribución, consistente con la Suite; reabre la opción D de §4) | pendiente (decisión §7.9, 2026-10-25) |
 
