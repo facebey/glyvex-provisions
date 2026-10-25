@@ -121,6 +121,7 @@ si Fabian prefiere mantenerse 100% Python y arrancar el MVP en horas.
 | 3 | Storage multi-path (R11) + librería con escaneo recursivo (R9) | ✅ `e18a4fc` |
 | 4 | Descargas a path de storage (destino = storage elegido, sin fallback a `D:\Downloads`) | ✅ `1677e35` |
 | 4b | (Adición UI 2026-10-25) Checkbox select-all en la tabla de archivos del repo | ✅ `5403170` |
+| 4c | (Adición 2026-10-25) Detección de hardware completa: CPU (modelo, vendor, relojes, socket), GPU multi-vendor (NVIDIA/AMD/Intel), RAM por módulo (tipo, velocidad, fabricante) | ✅ `dd578b9` |
 | 5 | Paquetes de modelos por escenario (R12) | pendiente |
 | 6 | Pausa/reintento + ajustes (contexto, umbrales, margen) + estimación v2 por metadatos GGUF | pendiente |
 | 7 | **Instalador Tauri/NSIS** para Glyvex Provisions (distribución, consistente con la Suite; reabre la opción D de §4) | pendiente (decisión §7.9, 2026-10-25) |
