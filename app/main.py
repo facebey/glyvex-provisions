@@ -1,4 +1,4 @@
-"""model-pilot — FastAPI backend (fase 1: MVP).
+"""Glyvex Provisions — FastAPI backend (fase 1: MVP).
 
 Solo se sirve en 127.0.0.1 (uvicorn --host 127.0.0.1). Sin telemetría;
 única red saliente: huggingface.co (búsqueda, listado y descargas).
@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from .api import router as api_router
 
 app = FastAPI(
-    title="model-pilot",
+    title="Glyvex Provisions",
     version="0.1.0",
     description="Detecta tu hardware y te sugiere/descarga modelos GGUF de Hugging Face.",
 )
@@ -22,4 +22,4 @@ def healthz() -> dict[str, str]:
 
 @app.get("/")
 def root() -> dict[str, str]:
-    return {"app": "model-pilot", "docs": "/docs"}
+    return {"app": "glyvex-provisions", "docs": "/docs"}

@@ -1,4 +1,4 @@
-// Cliente del backend de model-pilot (FastAPI en 127.0.0.1:8321, vía proxy Vite).
+// Cliente del backend de Glyvex Provisions (FastAPI en 127.0.0.1:8321, vía proxy Vite).
 // Solo se usa contra localhost; sin telemetría.
 
 export type Regime = 'gpu' | 'offload' | 'cpu'

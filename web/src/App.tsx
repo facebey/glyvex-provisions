@@ -232,7 +232,7 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="logo">◉</span> model-pilot
+          <span className="logo">◉</span> Glyvex Provisions
           <span className="sub">tu hardware → modelos que caben</span>
         </div>
         <div className="regimes">
@@ -464,7 +464,7 @@ export default function App() {
       </section>
 
       <footer className="foot">
-        model-pilot · 100% local · backend 127.0.0.1:8321 · token HF solo por env / `hf auth login`
+        Glyvex Provisions · 100% local · backend 127.0.0.1:8321 · token HF solo por env / `hf auth login`
       </footer>
     </div>
   )

@@ -1,4 +1,4 @@
-# Plan — APP de modelos con detección de hardware
+# Plan — Glyvex Provisions (tool externa de Glyvex-AI-Suite; ex model-pilot)
 
 > Borrador de decisión (2026-10-24). Propósito: elegir stack y arquitectura de la APP
 > que envolverá `hf-downloader` como core de descarga.
@@ -16,7 +16,7 @@
 | R7 | Repos gated: token por `HF_TOKEN` o `hf auth login` | Nunca se escribe en archivos del proyecto |
 | R8 | **Local 100%**: servidor solo en `127.0.0.1`, sin telemetría | Única salidas de red: `huggingface.co` + consultas locales de hardware |
 | R9 | Librería local: escanear los **paths de storage** (múltiples, recursivo, incluye subcarpetas) para ver qué modelos ya hay | v2 |
-| R10 | **Hardware multi-servidor**: además de detectar el local, el usuario **agrega servers manualmente** (GPU modelo + VRAM, RAM); el semáforo se calcula contra el perfil elegido | model-pilot es una tool para varios servers con hardware distinto (Fabian, 2026-10-25) |
+| R10 | **Hardware multi-servidor**: además de detectar el local, el usuario **agrega servers manualmente** (GPU modelo + VRAM, RAM); el semáforo se calcula contra el perfil elegido | Glyvex Provisions es una tool para varios servers con hardware distinto (Fabian, 2026-10-25) |
 | R11 | **Storage configurable**: el usuario agrega paths (disco local, NAS, UNC, server Linux, etc.) = destino de descargas + base de la librería | Lo más sencillo que se adapte al usuario/empresa: cualquier ruta, sin asumir el tipo de server |
 | R12 | **Paquetes**: conjuntos de modelos ya probados por escenario/uso (manifiesto + notas), exportables | Parte de la Fase 2 (decisión Fabian, 2026-10-25) |
 
@@ -114,10 +114,10 @@ si Fabian prefiere mantenerse 100% Python y arrancar el MVP en horas.
 ## 7. Decisiones
 
 1. **Stack**: ✅ **A — FastAPI + React (Vite + TypeScript)** (elegido por Fabian, 2026-10-24).
-2. **Nombre del proyecto**: ✅ **model-pilot** (carpeta + repo git en `D:\Proyectos\model-pilot`).
+2. **Nombre del proyecto**: ✅ **Glyvex Provisions** — tool externa de Glyvex-AI-Suite (ex `model-pilot`, rename 2026-10-25; la única pieza del stack que toca internet, instalable opcionalmente o como fase previa para provisionar el storage). Carpeta + repo git en `D:\Proyectos\glyvex-provisions`.
 3. Umbral del semáforo: 80/95% como base, margen 5% — **por confirmar** en fase 1 (quedará ajustable en ajustes).
-4. ✅ **Multi-servidor** (2026-10-25): model-pilot es una **tool para varios servers**: detección automática del hardware local + perfiles manuales (GPU modelo + VRAM, RAM) que agrega el usuario; el semáforo se calcula contra el perfil elegido.
+4. ✅ **Multi-servidor** (2026-10-25): Glyvex Provisions es una **tool para varios servers**: detección automática del hardware local + perfiles manuales (GPU modelo + VRAM, RAM) que agrega el usuario; el semáforo se calcula contra el perfil elegido.
 5. ✅ **Storage** (2026-10-25): multi-path configurado por el usuario (ej. `G:\LLM`, `C:\LLM`, NAS, UNC, server Linux — lo más sencillo que se adapte); escaneo **recursivo con subcarpetas** (mismo patrón que el config+scanner de Glyvex); el destino de descarga es uno de los paths de storage.
-6. ✅ **Paquetes** (2026-10-25): los paquetes de modelos probados por escenario son **parte de la Fase 2 de model-pilot** (no un módulo de Glyvex-AI-Suite).
+6. ✅ **Paquetes** (2026-10-25): los paquetes de modelos probados por escenario son **parte de la Fase 2 de Glyvex Provisions** (no un módulo de Glyvex-AI-Suite).
 7. ✅ **TUI hf-downloader** (2026-10-25): agregar prompt de carpeta de destino con default (gap: la web UI ya lo pide, la TUI no).
 8. ✅ **Ejecución de la Fase 2**: todo el rebaselining en una sola rama `feature/fase-2`; commits por unidad de cambio, merge con GO.
