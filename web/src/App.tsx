@@ -54,7 +54,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [repo, setRepo] = useState<RepoData | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [dest, setDest] = useState<string>('D:\\Downloads')
+  const [dest, setDest] = useState<string>('')  // R11: path de storage elegido
   const [jobs, setJobs] = useState<JobView[]>([])
   // Perfiles de hardware (R10): "local" (auto) + manuales
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -262,7 +262,9 @@ export default function App() {
     setError(null)
     try {
       await deleteStorage(id)
+      const removed = storages.find((s) => s.id === id)
       setStorages((ss) => ss.filter((s) => s.id !== id))
+      if (removed && dest === removed.path) setDest('')
       if (libFilter === id) setLibFilter('')
       if (lib) setLib(null) // la librería mostrada ya no es válida
     } catch (e) {
@@ -409,7 +411,6 @@ export default function App() {
                 <span className="hw-icon">💾</span>
                 <div>
                   <div className="hw-name">Disco: {fmtBytes(hw.disk_free_bytes)} libres</div>
-                  <div className="hw-meta">descargas → {hw.downloads_dir}</div>
                 </div>
               </div>
             </>
@@ -728,17 +729,28 @@ export default function App() {
                 Seleccionado: <b>{selected.size}</b> archivos · <b>{fmtBytes(selectedBytes)}</b>
               </span>
               <label className="dest">
-                Destino:
-                <input
+                Destino (storage):
+                <select
                   name="dest"
                   value={dest}
                   onChange={(e) => setDest(e.target.value)}
-                  placeholder="D:\Downloads"
-                />
+                >
+                  <option value="">— elegí un storage —</option>
+                  {storages.map((s) => (
+                    <option key={s.id} value={s.path}>
+                      {s.name} · {s.path}
+                    </option>
+                  ))}
+                </select>
               </label>
+              {storages.length === 0 && (
+                <span className="muted">
+                  Sin storages: agregá uno en «Storage y librería»
+                </span>
+              )}
               <button
                 className="primary"
-                disabled={selected.size === 0 || busy === 'dl'}
+                disabled={selected.size === 0 || !dest || busy === 'dl'}
                 onClick={doDownload}
               >
                 {busy === 'dl' ? 'Enviando…' : '⬇ Descargar'}

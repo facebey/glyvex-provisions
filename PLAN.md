@@ -111,6 +111,17 @@ si Fabian prefiere mantenerse 100% Python y arrancar el MVP en horas.
 | **2** | **Rebaselining 2026-10-25**: perfiles de hardware multi-servidor (R10) + storage multi-path configurable (R11) + librería del storage (R9) + paquetes de modelos por escenario (R12) + pausa/reintentos + ajustes (contexto, umbrales, margen) + estimación v2 por metadatos GGUF + prompt de carpeta de destino en la TUI de hf-downloader. Una sola rama `feature/fase-2`, commits por unidad de cambio. (Destino elegible + model card YA listos desde la adición de fase 1) |
 | **3 (opcional)** | Arrancar el modelo descargado (llama.cpp/Ollama) con la configuración elegida; presets; multi-GPU/AMD |
 
+### Progreso Fase 2 (rama `feature/fase-2`, commits por unidad)
+
+| # | Unidad | Estado |
+|---|---|---|
+| 1 | TUI hf-downloader: prompt de carpeta de destino | ✅ repo hf-downloader, `22846bc` + `6c6f6cd` (rama `feature/tui-destino`, sin mergear) |
+| 2 | Perfiles de hardware multi-servidor (R10) | ✅ `ab47686` |
+| 3 | Storage multi-path (R11) + librería con escaneo recursivo (R9) | ✅ `e18a4fc` |
+| 4 | Descargas a path de storage (destino = storage elegido, sin fallback a `D:\Downloads`) | ✅ commit actual |
+| 5 | Paquetes de modelos por escenario (R12) | pendiente |
+| 6 | Pausa/reintento + ajustes (contexto, umbrales, margen) + estimación v2 por metadatos GGUF | pendiente |
+
 ## 7. Decisiones
 
 1. **Stack**: ✅ **A — FastAPI + React (Vite + TypeScript)** (elegido por Fabian, 2026-10-24).

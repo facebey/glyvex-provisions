@@ -33,7 +33,7 @@ class SearchReq(BaseModel):
 class DownloadReq(BaseModel):
     repo_id: str
     files: list[str]
-    dest: str | None = None  # None -> D:\Downloads (default)
+    dest: str | None = None  # R11: path de storage configurado (obligatorio)
 
 
 def _file_label(path: str) -> str:
@@ -189,14 +189,25 @@ def repo_files(repo_id: str, regime: str = "gpu", profile: str = "local") -> dic
 
 
 def _validate_dest(dest: str | None) -> Path:
+    """R11: el destino de descarga es uno de los paths de storage
+    configurados (o una subcarpeta de alguno). Sin storage -> 422."""
     if dest is None or not dest.strip():
-        return dl.DEFAULT_DEST
+        raise HTTPException(422, "sin destino: elegí un path de storage")
     p = Path(dest.strip())
     if not p.is_absolute():
         raise HTTPException(422, f"destino no absoluto: {dest!r}")
     if not p.is_dir():
         raise HTTPException(422, f"directorio no existe: {p}")
-    return p
+    rp = p.resolve()
+    for s in storage.list_storages():
+        sp = Path(s["path"]).resolve()
+        if rp == sp or sp in rp.parents:
+            return p
+    raise HTTPException(
+        422,
+        f"el destino no es un path de storage configurado ({p}): agregalo "
+        "en la sección 'Storage y librería'",
+    )
 
 
 @router.post("/downloads")

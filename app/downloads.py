@@ -3,7 +3,7 @@
 Cada job corre `snapshot_download` en su propio hilo con un `tqdm_class`
 propio que publica eventos (start / progress / done / error) a una cola por
 job; el endpoint SSE (`GET /api/downloads/<id>/events`) los reenvía al
-navegador. Destino: `D:\\Downloads\\<repo>` (igual que el core).
+navegador. Destino: el path de storage elegido (R11): `<storage>\<repo>`.
 
 Fallback Xet -> LFS idéntico al del core para repos legacy.
 Token: el propio huggingface_hub (env HF_TOKEN o `hf auth login`).
