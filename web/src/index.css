@@ -199,7 +199,8 @@ button.mini {
   border-color: var(--accent);
 }
 
-.addprofile input {
+.addprofile input,
+.addprofile select {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -209,9 +210,35 @@ button.mini {
   min-width: 150px;
 }
 
-.addprofile input:focus {
+.addprofile input:focus,
+.addprofile select:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.addprofile select:disabled {
+  opacity: 0.5;
+}
+
+/* Adición 4d: formulario de perfil en cascada (column layout) */
+.addprofile.cascade {
+  flex-direction: column;
+  align-items: stretch;
+  margin-top: 10px;
+}
+
+.addprofile.cascade .formrow {
+  flex-wrap: wrap;
+}
+
+.addprofile.cascade .formrow .muted {
+  width: 44px;
+  flex-shrink: 0;
+}
+
+.addprofile.cascade button.primary {
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 .prof-list {

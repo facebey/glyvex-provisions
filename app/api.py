@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from hf_down import (MMPROJ_RE, MTP_RE, QUANT_RE, SUPPORT_EXTS,
                      SUPPORT_MAX_SIZE, WEIGHT_EXTS)
 
+from . import catalog
 from . import downloads as dl
 from . import fit, hfsearch
 from . import profiles
@@ -63,6 +64,13 @@ def _aux_label(path: str, ext: str, size: int) -> str:
 @router.get("/hardware")
 def hardware() -> dict:
     return detect()
+
+
+# ---- Catálogo de hardware (adición 4d): selects en cascada ------------------
+
+@router.get("/catalog")
+def get_catalog() -> dict:
+    return catalog.payload()
 
 
 # ---- Perfiles de hardware (R10): "local" (auto) + manuales -----------------

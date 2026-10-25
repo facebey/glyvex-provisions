@@ -24,7 +24,10 @@ import time
 
 import psutil
 
+from . import catalog
+
 DEFAULT_DOWNLOADS_DIR = r"D:\Downloads"
+GB = 1024 ** 3
 
 _SMI_QUERY = [
     "nvidia-smi",
@@ -132,11 +135,25 @@ def _all_gpus() -> list[dict]:
             continue
         g = smi_by_name.get(name)
         if g is not None:
-            gpus.append({**g, "vendor": "nvidia", "shared_memory": False})
+            gpus.append({**g, "vendor": "nvidia", "shared_memory": False,
+                         "vram_source": "nvidia-smi"})
         else:
             vendor = _gpu_vendor(name)
             vram = int(row.get("AdapterRAM") or 0)
-            shared = vendor == "intel" or vram <= 0
+            # 4d: el catálogo corrige la VRAM real cuando WMI miente
+            # (cap DWORD ~4 GB en no-NVIDIA; también iGPU con VRAM dedicada
+            # tipo Intel Arc, donde el nombre SÍ está en el catálogo).
+            hit = catalog.match_gpu(name)
+            if hit is not None:
+                vram = int(hit["vram_gb"] * GB)
+                source = "catalog"
+            elif vram > 0:
+                source = "wmi"
+            else:
+                source = None
+            # iGPU Intel sin hit en catálogo = memoria compartida (no cuenta
+            # como VRAM dedicada); un hit (p. ej. Arc A770) sí cuenta.
+            shared = vram <= 0 or (vendor == "intel" and hit is None)
             gpus.append({
                 "index": idx,
                 "name": name,
@@ -145,13 +162,15 @@ def _all_gpus() -> list[dict]:
                 "vram_free_bytes": 0,
                 "driver": (row.get("DriverVersion") or None),
                 "shared_memory": shared,
+                "vram_source": source,
             })
         idx += 1
     # NVIDIA que WMI no vio (raro): se agrega igual
     seen = {g["name"] for g in gpus}
     for g in _nvidia_gpus():
         if g["name"] not in seen:
-            gpus.append({**g, "vendor": "nvidia", "shared_memory": False})
+            gpus.append({**g, "vendor": "nvidia", "shared_memory": False,
+                         "vram_source": "nvidia-smi"})
     return gpus
 
 
@@ -179,6 +198,11 @@ def _cpu_info() -> dict:
         info["base_mhz"] = mhz if mhz > 0 else None
         info["socket"] = (row.get("SocketDesignation") or None)
         break
+    # 4d: WMI a veces no da reloj (MaxClockSpeed=0); el catálogo lo aporta.
+    if info["base_mhz"] is None and info["name"]:
+        hit = catalog.match_cpu(info["name"])
+        if hit is not None:
+            info["base_mhz"] = int(round((hit.get("base_ghz") or 0) * 1000)) or None
     return info
 
 

@@ -12,6 +12,7 @@ export interface Gpu {
   vram_free_bytes: number
   driver: string | null
   shared_memory?: boolean
+  vram_source?: 'nvidia-smi' | 'wmi' | 'catalog' | null
 }
 
 export interface Cpu {
@@ -79,6 +80,13 @@ export interface RepoData {
 export interface ProfileGpu {
   name: string
   vram_gb: number
+  vendor?: string | null
+}
+
+export interface ProfileCpu {
+  vendor?: string | null
+  model?: string | null
+  threads?: number | null
 }
 
 export interface Profile {
@@ -88,6 +96,10 @@ export interface Profile {
   gpus: ProfileGpu[]
   ram_gb: number
   note: string | null
+  // Adición 4d (opcionales: perfiles viejos no los traen)
+  cpu?: ProfileCpu | null
+  ram_type?: string | null
+  ram_speed_mhz?: number | null
 }
 
 export interface ProfileIn {
@@ -95,6 +107,30 @@ export interface ProfileIn {
   gpus: ProfileGpu[]
   ram_gb: number
   note?: string | null
+  cpu?: ProfileCpu | null
+  ram_type?: string | null
+  ram_speed_mhz?: number | null
+}
+
+// Catálogo de hardware (adición 4d): modelos representativos por vendor +
+// VRAM mapeada por GPU + velocidades de RAM por tipo.
+export interface CatalogCpu {
+  model: string
+  cores: number
+  threads: number
+  base_ghz: number
+  boost_ghz: number
+}
+
+export interface CatalogGpu {
+  model: string
+  vram_gb: number
+}
+
+export interface Catalog {
+  cpus: Record<string, CatalogCpu[]>
+  gpus: Record<string, CatalogGpu[]>
+  ram: Record<string, number[]>
 }
 
 // Storage multi-path (R11) + librería local (R9)
@@ -153,6 +189,9 @@ async function json<T>(r: Response): Promise<T> {
 
 export const getHardware = () =>
   fetch('/api/hardware').then((r) => json<Hardware>(r))
+
+export const getCatalog = () =>
+  fetch('/api/catalog').then((r) => json<Catalog>(r))
 
 export const searchModels = (query: string, limit = 20) =>
   fetch('/api/search', {

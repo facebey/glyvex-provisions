@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  type Catalog,
   type FileRow,
   type Hardware,
   type JobEvent,
@@ -15,6 +16,7 @@ import {
   deleteProfile,
   deleteStorage,
   fmtBytes,
+  getCatalog,
   getHardware,
   getLibrary,
   getRepo,
@@ -61,9 +63,19 @@ export default function App() {
   const [profileId, setProfileId] = useState<string>('local')
   const [showAddProfile, setShowAddProfile] = useState(false)
   const [pName, setPName] = useState('')
-  const [pGpu, setPGpu] = useState('')
   const [pVram, setPVram] = useState('')
   const [pRam, setPRam] = useState('')
+  // Adición 4d: catálogo (vendor → modelo → VRAM autofillada, editable)
+  const [cat, setCat] = useState<Catalog | null>(null)
+  const [pCpuVendor, setPCpuVendor] = useState('')
+  const [pCpuModel, setPCpuModel] = useState('') // '' | 'other' | modelo
+  const [pCpuOther, setPCpuOther] = useState('')
+  const [pCpuThreads, setPCpuThreads] = useState('')
+  const [pGpuVendor, setPGpuVendor] = useState('')
+  const [pGpuModel, setPGpuModel] = useState('') // '' | 'other' | modelo
+  const [pGpuOther, setPGpuOther] = useState('')
+  const [pRamType, setPRamType] = useState('')
+  const [pRamSpeed, setPRamSpeed] = useState('')
   // Storage multi-path (R11) + librería local (R9)
   const [storages, setStorages] = useState<Storage[]>([])
   const [showAddStorage, setShowAddStorage] = useState(false)
@@ -145,6 +157,9 @@ export default function App() {
     listStorages().then((d) => setStorages(d.storages)).catch(() => {
       /* backend caído: ya se muestra el error del hardware */
     })
+    getCatalog().then(setCat).catch(() => {
+      /* catálogo no llega: la cascada queda vacía, sigue siendo usable */
+    })
     listDownloads()
       .then((d) => {
         for (const j of d.jobs) {
@@ -199,23 +214,96 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regime, profileId])
 
+  // Adición 4d: cascada vendor → modelo (VRAM/hilos autofillados del catálogo)
+  const onCpuVendor = (v: string) => {
+    setPCpuVendor(v)
+    setPCpuModel('')
+    setPCpuOther('')
+    setPCpuThreads('')
+  }
+
+  const onCpuModel = (v: string) => {
+    setPCpuModel(v)
+    if (v && v !== 'other' && pCpuVendor && cat) {
+      const hit = (cat.cpus[pCpuVendor] ?? []).find((c) => c.model === v)
+      setPCpuThreads(hit ? String(hit.threads) : '')
+    } else {
+      setPCpuThreads('')
+    }
+  }
+
+  const onGpuVendor = (v: string) => {
+    setPGpuVendor(v)
+    setPGpuModel('')
+    setPGpuOther('')
+    setPVram('')
+  }
+
+  const onGpuModel = (v: string) => {
+    setPGpuModel(v)
+    if (v && v !== 'other' && pGpuVendor && cat) {
+      const hit = (cat.gpus[pGpuVendor] ?? []).find((g) => g.model === v)
+      setPVram(hit ? String(hit.vram_gb) : '')
+    } else {
+      setPVram('')
+    }
+  }
+
+  const onRamType = (v: string) => {
+    setPRamType(v)
+    setPRamSpeed('')
+  }
+
+  const resetProfileForm = () => {
+    setPName('')
+    setPVram('')
+    setPRam('')
+    setPCpuVendor('')
+    setPCpuModel('')
+    setPCpuOther('')
+    setPCpuThreads('')
+    setPGpuVendor('')
+    setPGpuModel('')
+    setPGpuOther('')
+    setPRamType('')
+    setPRamSpeed('')
+  }
+
   const doAddProfile = async () => {
     const name = pName.trim()
-    const vram = parseFloat(pVram)
     const ram = parseFloat(pRam)
-    if (!name || !Number.isFinite(vram) || vram <= 0 ||
-        !Number.isFinite(ram) || ram <= 0) return
+    const gpuName = pGpuModel === 'other' ? pGpuOther.trim() : pGpuModel
+    const vram = parseFloat(pVram)
+    const cpuModel = pCpuModel === 'other' ? pCpuOther.trim() : pCpuModel
+    const threads = parseInt(pCpuThreads, 10)
+    const speed = parseInt(pRamSpeed, 10)
+    if (!name || !Number.isFinite(ram) || ram <= 0) return
+    if (gpuName && (!Number.isFinite(vram) || vram <= 0)) return
     setBusy('profile')
     setError(null)
     try {
-      const gpus = pGpu.trim() ? [{ name: pGpu.trim(), vram_gb: vram }] : []
-      const p = await addProfile({ name, gpus, ram_gb: ram })
+      const gpus = gpuName
+        ? [{ vendor: pGpuVendor || null, name: gpuName, vram_gb: vram }]
+        : []
+      const cpu =
+        pCpuVendor || cpuModel || Number.isFinite(threads)
+          ? {
+              vendor: pCpuVendor || null,
+              model: cpuModel || null,
+              threads: Number.isFinite(threads) ? threads : null,
+            }
+          : null
+      const p = await addProfile({
+        name,
+        gpus,
+        ram_gb: ram,
+        cpu,
+        ram_type: pRamType || null,
+        ram_speed_mhz: Number.isFinite(speed) ? speed : null,
+      })
       setProfiles((ps) => [...ps, p])
       setProfileId(p.id)
-      setPName('')
-      setPGpu('')
-      setPVram('')
-      setPRam('')
+      resetProfileForm()
       setShowAddProfile(false)
     } catch (e) {
       setError(String(e))
@@ -513,10 +601,27 @@ export default function App() {
                 </div>
               </div>
             )}
+            {(activeProfile.cpu?.model || activeProfile.cpu?.vendor) && (
+              <div className="hw-item">
+                <span className="hw-icon">⚙️</span>
+                <div>
+                  <div className="hw-name">
+                    CPU: {activeProfile.cpu.vendor ? activeProfile.cpu.vendor + ' ' : ''}
+                    {activeProfile.cpu.model ?? '—'}
+                    {activeProfile.cpu.threads ? ` (${activeProfile.cpu.threads} hilos)` : ''}
+                  </div>
+                  <div className="hw-meta">declarada manualmente</div>
+                </div>
+              </div>
+            )}
             <div className="hw-item">
               <span className="hw-icon">🧠</span>
               <div>
-                <div className="hw-name">RAM {activeProfile.ram_gb} GB</div>
+                <div className="hw-name">
+                  RAM {activeProfile.ram_gb} GB
+                  {activeProfile.ram_type ? ` ${activeProfile.ram_type}` : ''}
+                  {activeProfile.ram_speed_mhz ? ` ${activeProfile.ram_speed_mhz} MT/s` : ''}
+                </div>
                 <div className="hw-meta">declarada manualmente</div>
               </div>
             </div>
@@ -549,30 +654,122 @@ export default function App() {
           </button>
         </div>
         {showAddProfile && (
-          <div className="row addprofile">
+          <div className="addprofile cascade">
             <input
               placeholder="Nombre (p. ej. Server-01)"
               value={pName}
               onChange={(e) => setPName(e.target.value)}
             />
-            <input
-              placeholder="GPU (p. ej. RTX 4090; vacío si no tiene)"
-              value={pGpu}
-              onChange={(e) => setPGpu(e.target.value)}
-            />
-            <input
-              type="number" min="0.5" step="0.5" placeholder="VRAM GB"
-              value={pVram}
-              onChange={(e) => setPVram(e.target.value)}
-            />
-            <input
-              type="number" min="1" step="1" placeholder="RAM GB"
-              value={pRam}
-              onChange={(e) => setPRam(e.target.value)}
-            />
+            <div className="row formrow">
+              <span className="muted">CPU:</span>
+              <select
+                value={pCpuVendor}
+                onChange={(e) => onCpuVendor(e.target.value)}
+              >
+                <option value="">— sin CPU —</option>
+                {cat && Object.keys(cat.cpus).map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              <select
+                value={pCpuModel}
+                onChange={(e) => onCpuModel(e.target.value)}
+                disabled={!pCpuVendor}
+              >
+                <option value="">— modelo —</option>
+                {cat &&
+                  (cat.cpus[pCpuVendor] ?? []).map((c) => (
+                    <option key={c.model} value={c.model}>{c.model}</option>
+                  ))}
+                {pCpuVendor && <option value="other">Otro… (manual)</option>}
+              </select>
+              {pCpuModel === 'other' ? (
+                <input
+                  placeholder="Modelo de CPU (texto libre)"
+                  value={pCpuOther}
+                  onChange={(e) => setPCpuOther(e.target.value)}
+                />
+              ) : (
+                <input
+                  type="number" min="1" step="1" placeholder="Hilos"
+                  value={pCpuThreads}
+                  onChange={(e) => setPCpuThreads(e.target.value)}
+                  disabled={!pCpuModel}
+                />
+              )}
+            </div>
+            <div className="row formrow">
+              <span className="muted">GPU:</span>
+              <select
+                value={pGpuVendor}
+                onChange={(e) => onGpuVendor(e.target.value)}
+              >
+                <option value="">— sin GPU —</option>
+                {cat && Object.keys(cat.gpus).map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              <select
+                value={pGpuModel}
+                onChange={(e) => onGpuModel(e.target.value)}
+                disabled={!pGpuVendor}
+              >
+                <option value="">— modelo —</option>
+                {cat &&
+                  (cat.gpus[pGpuVendor] ?? []).map((g) => (
+                    <option key={g.model} value={g.model}>{g.model}</option>
+                  ))}
+                {pGpuVendor && <option value="other">Otro… (manual)</option>}
+              </select>
+              {pGpuModel === 'other' && (
+                <input
+                  placeholder="Modelo de GPU (texto libre)"
+                  value={pGpuOther}
+                  onChange={(e) => setPGpuOther(e.target.value)}
+                />
+              )}
+              <input
+                type="number" min="0.5" step="0.5"
+                placeholder="VRAM GB (autofill, editable)"
+                value={pVram}
+                onChange={(e) => setPVram(e.target.value)}
+                disabled={!pGpuModel}
+              />
+            </div>
+            <div className="row formrow">
+              <span className="muted">RAM:</span>
+              <input
+                type="number" min="1" step="1" placeholder="Capacidad GB"
+                value={pRam}
+                onChange={(e) => setPRam(e.target.value)}
+              />
+              <select
+                value={pRamType}
+                onChange={(e) => onRamType(e.target.value)}
+              >
+                <option value="">— tipo —</option>
+                {cat && Object.keys(cat.ram).map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <select
+                value={pRamSpeed}
+                onChange={(e) => setPRamSpeed(e.target.value)}
+                disabled={!pRamType}
+              >
+                <option value="">— velocidad —</option>
+                {cat &&
+                  (cat.ram[pRamType] ?? []).map((s) => (
+                    <option key={s} value={s}>{s} MT/s</option>
+                  ))}
+              </select>
+            </div>
             <button
               className="primary"
-              disabled={busy === 'profile' || !pName.trim()}
+              disabled={
+                busy === 'profile' || !pName.trim() ||
+                !Number.isFinite(parseFloat(pRam))
+              }
               onClick={doAddProfile}
             >
               {busy === 'profile' ? 'Guardando…' : 'Guardar'}
@@ -589,7 +786,8 @@ export default function App() {
                   {p.gpus.length > 0
                     ? p.gpus.map((g) => `${g.name} ${g.vram_gb} GB`).join(', ')
                     : 'sin GPU'}
-                  {' · '}RAM {p.ram_gb} GB
+                  {p.cpu?.model ? ` · CPU ${p.cpu.model}` : ''}
+                  {' · '}RAM {p.ram_gb} GB{p.ram_type ? ` ${p.ram_type}` : ''}
                 </span>
                 <button
                   className="mini danger"

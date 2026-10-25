@@ -29,6 +29,14 @@ PROFILES_FILE = Path(__file__).resolve().parent.parent / "data" / "profiles.json
 class GpuSpec(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     vram_gb: float = Field(gt=0, le=4096)
+    vendor: str | None = Field(default=None, max_length=20)  # 4d: NVIDIA/AMD/Intel
+
+
+class CpuSpec(BaseModel):
+    """CPU declarada (adición 4d) — referencia para el perfil manual."""
+    vendor: str | None = Field(default=None, max_length=20)   # Intel / AMD
+    model: str | None = Field(default=None, max_length=120)
+    threads: int | None = Field(default=None, gt=0, le=8192)
 
 
 class ProfileIn(BaseModel):
@@ -36,6 +44,10 @@ class ProfileIn(BaseModel):
     gpus: list[GpuSpec] = Field(default_factory=list)
     ram_gb: float = Field(gt=0, le=65536)
     note: str | None = Field(default=None, max_length=280)
+    # Adición 4d (catalogo): opcionales para compatibilidad con perfiles viejos
+    cpu: CpuSpec | None = None
+    ram_type: str | None = Field(default=None, max_length=12)   # DDR3/DDR4/DDR5
+    ram_speed_mhz: int | None = Field(default=None, gt=0, le=64000)
 
 
 def _load() -> list[dict]:
@@ -56,17 +68,29 @@ def _save(profiles: list[dict]) -> None:
 
 def _auto_profile() -> dict:
     hw = detect()
+    cpu = hw.get("cpu") or {}
+    mods = hw.get("ram_modules") or []
+    first_mod = mods[0] if mods else {}
     return {
         "id": AUTO_ID,
         "name": AUTO_NAME,
         "kind": "auto",
         # Solo GPUs con VRAM dedicada (las iGPU compartidas no aportan capacidad)
         "gpus": [
-            {"name": g["name"], "vram_gb": round(g["vram_total_bytes"] / GB, 1)}
+            {"name": g["name"], "vram_gb": round(g["vram_total_bytes"] / GB, 1),
+             "vendor": g.get("vendor")}
             for g in hw["gpus"]
             if g["vram_total_bytes"] > 0
         ],
         "ram_gb": round(hw["ram_total_bytes"] / GB, 1),
+        # Adición 4d: mismos campos que el perfil manual (desde la detección)
+        "cpu": {
+            "vendor": cpu.get("vendor"),
+            "model": cpu.get("name"),
+            "threads": cpu.get("logical"),
+        },
+        "ram_type": first_mod.get("mem_type"),
+        "ram_speed_mhz": first_mod.get("speed_mhz"),
         "note": None,
     }
 
