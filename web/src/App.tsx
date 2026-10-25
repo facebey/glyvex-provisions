@@ -360,6 +360,35 @@ export default function App() {
   }
 
   const gpus = hw?.gpus ?? []
+
+  // Detalle de RAM por módulos (WMI): "4× 16 GB · DDR5 · 5866 MHz · Corsair"
+  const ramDetail = (h: Hardware): string => {
+    const m = h.ram_modules ?? []
+    if (m.length === 0) return ''
+    const type = m[0].mem_type ?? ''
+    const speed = m[0].speed_mhz
+    const mfr = m[0].manufacturer ?? ''
+    return [
+      `${m.length}× ${fmtBytes(m[0].size_bytes)}`,
+      type,
+      speed ? `${speed} MHz` : '',
+      mfr,
+    ].filter(Boolean).join(' · ')
+  }
+
+  const cpuDetail = (h: Hardware): string => {
+    const c = h.cpu
+    if (!c) return ''
+    const cores = c.cores > 0 && c.cores !== c.logical
+      ? `${c.cores} cores / ${c.logical} hilos`
+      : `${c.logical} hilos`
+    return [
+      c.vendor ?? '',
+      cores,
+      c.base_mhz ? `base ${(c.base_mhz / 1000).toFixed(1)} GHz` : '',
+      c.socket ?? '',
+    ].filter(Boolean).join(' · ')
+  }
   const activeProfile = profiles.find((p) => p.id === profileId) ?? null
   const manualProfiles = profiles.filter((p) => p.kind === 'manual')
 
@@ -403,13 +432,26 @@ export default function App() {
         {profileId === 'local' ? (
           hw ? (
             <>
+              {hw.cpu?.name && (
+                <div className="hw-item">
+                  <span className="hw-icon">🖥️</span>
+                  <div>
+                    <div className="hw-name">{hw.cpu.name}</div>
+                    <div className="hw-meta">{cpuDetail(hw)}</div>
+                  </div>
+                </div>
+              )}
               {gpus.map((g) => (
-                <div key={g.index} className="hw-item">
+                <div key={`${g.vendor}-${g.index}`} className="hw-item">
                   <span className="hw-icon">🎮</span>
                   <div>
                     <div className="hw-name">{g.name}</div>
                     <div className="hw-meta">
-                      VRAM {fmtBytes(g.vram_total_bytes)} · libre {fmtBytes(g.vram_free_bytes)} · driver {g.driver}
+                      {g.vendor.toUpperCase()} ·{' '}
+                      {g.shared_memory
+                        ? 'memoria compartida (sin VRAM dedicada)'
+                        : `VRAM ${fmtBytes(g.vram_total_bytes)} · libre ${fmtBytes(g.vram_free_bytes)}`}
+                      {g.driver ? ` · driver ${g.driver}` : ''}
                     </div>
                   </div>
                 </div>
@@ -418,7 +460,7 @@ export default function App() {
                 <div className="hw-item">
                   <span className="hw-icon">⚠️</span>
                   <div>
-                    <div className="hw-name">Sin GPU NVIDIA detectada</div>
+                    <div className="hw-name">Sin GPU detectada</div>
                     <div className="hw-meta">usa el régimen CPU / Offload</div>
                   </div>
                 </div>
@@ -427,7 +469,7 @@ export default function App() {
                 <span className="hw-icon">🧠</span>
                 <div>
                   <div className="hw-name">RAM {fmtBytes(hw.ram_total_bytes)}</div>
-                  <div className="hw-meta">{hw.cpu_cores} núcleos de CPU</div>
+                  <div className="hw-meta">{ramDetail(hw)}</div>
                 </div>
               </div>
               <div className="hw-item">

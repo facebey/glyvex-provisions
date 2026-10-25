@@ -60,9 +60,11 @@ def _auto_profile() -> dict:
         "id": AUTO_ID,
         "name": AUTO_NAME,
         "kind": "auto",
+        # Solo GPUs con VRAM dedicada (las iGPU compartidas no aportan capacidad)
         "gpus": [
             {"name": g["name"], "vram_gb": round(g["vram_total_bytes"] / GB, 1)}
             for g in hw["gpus"]
+            if g["vram_total_bytes"] > 0
         ],
         "ram_gb": round(hw["ram_total_bytes"] / GB, 1),
         "note": None,

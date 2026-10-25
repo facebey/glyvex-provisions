@@ -7,15 +7,36 @@ export type FitStatus = 'ok' | 'tight' | 'no' | 'na'
 export interface Gpu {
   index: number
   name: string
+  vendor: 'nvidia' | 'amd' | 'intel' | 'other'
   vram_total_bytes: number
   vram_free_bytes: number
-  driver: string
+  driver: string | null
+  shared_memory?: boolean
+}
+
+export interface Cpu {
+  name: string | null
+  vendor: string | null
+  cores: number
+  logical: number
+  base_mhz: number | null
+  socket: string | null
+}
+
+export interface RamModule {
+  size_bytes: number
+  speed_mhz: number | null
+  mem_type: string | null
+  manufacturer: string | null
+  part_number: string | null
 }
 
 export interface Hardware {
   gpus: Gpu[]
+  cpu: Cpu | null
   ram_total_bytes: number
   ram_available_bytes: number
+  ram_modules: RamModule[]
   cpu_cores: number
   disk_free_bytes: number
   disk_total_bytes: number
