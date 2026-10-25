@@ -72,6 +72,7 @@
 ### D) Tauri + React (Python como sidecar) — *desktop ligero*
 - ✅ Binario chico, shell nativa.
 - ⚠️ Toolchain de Rust + management de sidecar = mayor complejidad de A sin ganancia clara hoy.
+- 📌 **Reabierta 2026-10-25 solo para distribución** (decisión §7.9): instalador Tauri/NSIS de Provisions; el stack de desarrollo sigue siendo A.
 
 ### E) Gradio — *prototipo en un día*
 - ✅ Rapidísimo para validar la estimación VRAM.
@@ -118,9 +119,11 @@ si Fabian prefiere mantenerse 100% Python y arrancar el MVP en horas.
 | 1 | TUI hf-downloader: prompt de carpeta de destino | ✅ repo hf-downloader, `22846bc` + `6c6f6cd` (rama `feature/tui-destino`, sin mergear) |
 | 2 | Perfiles de hardware multi-servidor (R10) | ✅ `ab47686` |
 | 3 | Storage multi-path (R11) + librería con escaneo recursivo (R9) | ✅ `e18a4fc` |
-| 4 | Descargas a path de storage (destino = storage elegido, sin fallback a `D:\Downloads`) | ✅ commit actual |
+| 4 | Descargas a path de storage (destino = storage elegido, sin fallback a `D:\Downloads`) | ✅ `1677e35` |
+| 4b | (Adición UI 2026-10-25) Checkbox select-all en la tabla de archivos del repo | ✅ `5403170` |
 | 5 | Paquetes de modelos por escenario (R12) | pendiente |
 | 6 | Pausa/reintento + ajustes (contexto, umbrales, margen) + estimación v2 por metadatos GGUF | pendiente |
+| 7 | **Instalador Tauri/NSIS** para Glyvex Provisions (distribución, consistente con la Suite; reabre la opción D de §4) | pendiente (decisión §7.9, 2026-10-25) |
 
 ## 7. Decisiones
 
@@ -132,3 +135,4 @@ si Fabian prefiere mantenerse 100% Python y arrancar el MVP en horas.
 6. ✅ **Paquetes** (2026-10-25): los paquetes de modelos probados por escenario son **parte de la Fase 2 de Glyvex Provisions** (no un módulo de Glyvex-AI-Suite).
 7. ✅ **TUI hf-downloader** (2026-10-25): agregar prompt de carpeta de destino con default (gap: la web UI ya lo pide, la TUI no).
 8. ✅ **Ejecución de la Fase 2**: todo el rebaselining en una sola rama `feature/fase-2`; commits por unidad de cambio, merge con GO.
+9. ✅ **Distribución / instalador** (2026-10-25): Glyvex Provisions se distribuye con **instalador Tauri/NSIS propio** (consistente con el empaquetado Tauri de Glyvex-AI-Suite). Esto **reabre la opción D de §4** (Tauri + React, Python como sidecar), descartada en el MVP por complejidad: se adopta ahora solo para la capa de distribución (shell Tauri que empaqueta la UI build + levanta uvicorn como sidecar; NSIS vía tauri-bundler). El stack de desarrollo sigue siendo el de la opción A. Unidad 7.
