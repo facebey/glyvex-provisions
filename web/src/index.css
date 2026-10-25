@@ -49,7 +49,14 @@ body {
 }
 
 .brand .logo {
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -4px;
+  margin-right: 2px;
+}
+
+.brand .logo svg {
+  display: block;
 }
 
 .brand .sub {
