@@ -315,6 +315,14 @@ export default function App() {
     })
   }
 
+  // Select-all de la tabla: marca/desmarca TODOS los archivos del repo.
+  const toggleAll = () => {
+    if (!repo) return
+    const all = repo.rows.length > 0 &&
+      repo.rows.every((r) => selected.has(r.path))
+    setSelected(all ? new Set() : new Set(repo.rows.map((r) => r.path)))
+  }
+
   const selectedBytes = (repo?.rows ?? [])
     .filter((r) => selected.has(r.path))
     .reduce((a, r) => a + r.size, 0)
@@ -760,7 +768,15 @@ export default function App() {
           <table className="tbl files">
             <thead>
               <tr>
-                <th style={{ width: 28 }}></th>
+                <th style={{ width: 28 }}>
+                  <input
+                    type="checkbox"
+                    title="Seleccionar / desmarcar todos los archivos"
+                    checked={repo.rows.length > 0 &&
+                      repo.rows.every((r) => selected.has(r.path))}
+                    onChange={toggleAll}
+                  />
+                </th>
                 <th>Cuantización</th>
                 <th>Tamaño</th>
                 <th>Estima con overhead</th>
