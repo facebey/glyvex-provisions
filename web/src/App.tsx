@@ -368,28 +368,19 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <span className="logo">
-            {/* Ícono Glyvex AI (brand kit oficial) — red neural violeta→sky */}
+            {/* Logo Glyvex AI (brand kit oficial) — diamante teal + punto naranja (idéntico a ai-suite.glyvexgroup.com) */}
             <svg viewBox="0 0 80 80" width="24" height="24" role="img" aria-label="Glyvex AI">
               <defs>
                 <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#7c3aed" />
+                  <stop offset="0%" stopColor="#0d9488" />
+                  <stop offset="50%" stopColor="#06b6d4" />
                   <stop offset="100%" stopColor="#0ea5e9" />
                 </linearGradient>
               </defs>
-              <circle cx="40" cy="40" r="28" fill="none" stroke="url(#logoGrad)" strokeWidth="2" />
-              <circle cx="40" cy="40" r="8" fill="#7c3aed" />
-              <circle cx="40" cy="12" r="4.5" fill="#0ea5e9" />
-              <circle cx="64" cy="26" r="4.5" fill="#06b6d4" />
-              <circle cx="64" cy="54" r="4.5" fill="#7c3aed" opacity="0.75" />
-              <circle cx="40" cy="68" r="4.5" fill="#0ea5e9" opacity="0.75" />
-              <circle cx="16" cy="54" r="4.5" fill="#06b6d4" />
-              <circle cx="16" cy="26" r="4.5" fill="#7c3aed" opacity="0.55" />
-              <line x1="40" y1="32" x2="40" y2="16" stroke="#0ea5e9" strokeWidth="1.5" />
-              <line x1="47" y1="35" x2="60" y2="29" stroke="#06b6d4" strokeWidth="1.5" />
-              <line x1="47" y1="45" x2="60" y2="51" stroke="#7c3aed" strokeWidth="1.5" />
-              <line x1="40" y1="48" x2="40" y2="64" stroke="#0ea5e9" strokeWidth="1.5" />
-              <line x1="33" y1="45" x2="20" y2="51" stroke="#06b6d4" strokeWidth="1.5" />
-              <line x1="33" y1="35" x2="20" y2="29" stroke="#7c3aed" strokeWidth="1.5" />
+              <polygon points="40,12 66,38 40,72 14,38" fill="url(#logoGrad)" />
+              <polygon points="40,12 66,38 40,40" fill="#0d9488" opacity="0.35" />
+              <polygon points="40,40 66,38 40,72" fill="#0ea5e9" opacity="0.25" />
+              <circle cx="40" cy="38" r="4.5" fill="#f97316" />
             </svg>
           </span> Glyvex Provisions
           <span className="sub">tu hardware → modelos que caben</span>
