@@ -9,6 +9,7 @@ import {
   type ModelHit,
   type Package,
   type Profile,
+  type ProfileGpu,
   type Regime,
   type RepoData,
   type Storage,
@@ -49,6 +50,14 @@ interface JobView {
   log: string[]
 }
 
+// Fila de GPU en el formulario de perfil manual (multi-GPU)
+interface GpuRow {
+  vendor: string
+  model: string // '' | 'other' | modelo
+  other: string
+  vram: string
+}
+
 const REGIME_LABELS: Record<Regime, string> = {
   gpu: 'Solo GPU (VRAM)',
   offload: 'Offload GPU+RAM',
@@ -71,7 +80,6 @@ export default function App() {
   const [profileId, setProfileId] = useState<string>('local')
   const [showAddProfile, setShowAddProfile] = useState(false)
   const [pName, setPName] = useState('')
-  const [pVram, setPVram] = useState('')
   const [pRam, setPRam] = useState('')
   // Adición 4d: catálogo (vendor → modelo → VRAM autofillada, editable)
   const [cat, setCat] = useState<Catalog | null>(null)
@@ -79,9 +87,8 @@ export default function App() {
   const [pCpuModel, setPCpuModel] = useState('') // '' | 'other' | modelo
   const [pCpuOther, setPCpuOther] = useState('')
   const [pCpuThreads, setPCpuThreads] = useState('')
-  const [pGpuVendor, setPGpuVendor] = useState('')
-  const [pGpuModel, setPGpuModel] = useState('') // '' | 'other' | modelo
-  const [pGpuOther, setPGpuOther] = useState('')
+  // Multi-GPU: filas dinámicas (vendor → modelo → VRAM autofillada)
+  const [gpuRows, setGpuRows] = useState<GpuRow[]>([])
   const [pRamType, setPRamType] = useState('')
   const [pRamSpeed, setPRamSpeed] = useState('')
   // Storage multi-path (R11) + librería local (R9)
@@ -258,22 +265,33 @@ export default function App() {
     }
   }
 
-  const onGpuVendor = (v: string) => {
-    setPGpuVendor(v)
-    setPGpuModel('')
-    setPGpuOther('')
-    setPVram('')
-  }
+  const addGpuRow = () =>
+    setGpuRows((rs) => [...rs, { vendor: '', model: '', other: '', vram: '' }])
 
-  const onGpuModel = (v: string) => {
-    setPGpuModel(v)
-    if (v && v !== 'other' && pGpuVendor && cat) {
-      const hit = (cat.gpus[pGpuVendor] ?? []).find((g) => g.model === v)
-      setPVram(hit ? String(hit.vram_gb) : '')
-    } else {
-      setPVram('')
-    }
-  }
+  const removeGpuRow = (i: number) =>
+    setGpuRows((rs) => rs.filter((_, j) => j !== i))
+
+  const onGpuRowVendor = (i: number, v: string) =>
+    setGpuRows((rs) =>
+      rs.map((r, j) => (j === i ? { vendor: v, model: '', other: '', vram: '' } : r)),
+    )
+
+  const onGpuRowModel = (i: number, v: string) =>
+    setGpuRows((rs) =>
+      rs.map((r, j) => {
+        if (j !== i) return r
+        // VRAM autocompletada desde el catálogo (editable)
+        let vram = ''
+        if (v && v !== 'other' && r.vendor && cat) {
+          const hit = (cat.gpus[r.vendor] ?? []).find((g) => g.model === v)
+          if (hit) vram = String(hit.vram_gb)
+        }
+        return { ...r, model: v, other: '', vram }
+      }),
+    )
+
+  const onGpuRowField = (i: number, patch: Partial<GpuRow>) =>
+    setGpuRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
 
   const onRamType = (v: string) => {
     setPRamType(v)
@@ -282,15 +300,12 @@ export default function App() {
 
   const resetProfileForm = () => {
     setPName('')
-    setPVram('')
     setPRam('')
     setPCpuVendor('')
     setPCpuModel('')
     setPCpuOther('')
     setPCpuThreads('')
-    setPGpuVendor('')
-    setPGpuModel('')
-    setPGpuOther('')
+    setGpuRows([])
     setPRamType('')
     setPRamSpeed('')
   }
@@ -298,19 +313,22 @@ export default function App() {
   const doAddProfile = async () => {
     const name = pName.trim()
     const ram = parseFloat(pRam)
-    const gpuName = pGpuModel === 'other' ? pGpuOther.trim() : pGpuModel
-    const vram = parseFloat(pVram)
     const cpuModel = pCpuModel === 'other' ? pCpuOther.trim() : pCpuModel
     const threads = parseInt(pCpuThreads, 10)
     const speed = parseInt(pRamSpeed, 10)
     if (!name || !Number.isFinite(ram) || ram <= 0) return
-    if (gpuName && (!Number.isFinite(vram) || vram <= 0)) return
+    // Multi-GPU: cada fila con modelo exige VRAM válida; las filas vacías se ignoran
+    const gpus: ProfileGpu[] = []
+    for (const r of gpuRows) {
+      const gpuName = r.model === 'other' ? r.other.trim() : r.model
+      if (!gpuName) continue
+      const vram = parseFloat(r.vram)
+      if (!Number.isFinite(vram) || vram <= 0) return
+      gpus.push({ vendor: r.vendor || null, name: gpuName, vram_gb: vram })
+    }
     setBusy('profile')
     setError(null)
     try {
-      const gpus = gpuName
-        ? [{ vendor: pGpuVendor || null, name: gpuName, vram_gb: vram }]
-        : []
       const cpu =
         pCpuVendor || cpuModel || Number.isFinite(threads)
           ? {
@@ -847,43 +865,60 @@ export default function App() {
               )}
             </div>
             <div className="row formrow">
-              <span className="muted">GPU:</span>
-              <select
-                value={pGpuVendor}
-                onChange={(e) => onGpuVendor(e.target.value)}
-              >
-                <option value="">— sin GPU —</option>
-                {cat && Object.keys(cat.gpus).map((v) => (
-                  <option key={v} value={v}>{v}</option>
-                ))}
-              </select>
-              <select
-                value={pGpuModel}
-                onChange={(e) => onGpuModel(e.target.value)}
-                disabled={!pGpuVendor}
-              >
-                <option value="">— modelo —</option>
-                {cat &&
-                  (cat.gpus[pGpuVendor] ?? []).map((g) => (
-                    <option key={g.model} value={g.model}>{g.model}</option>
-                  ))}
-                {pGpuVendor && <option value="other">Otro… (manual)</option>}
-              </select>
-              {pGpuModel === 'other' && (
-                <input
-                  placeholder="Modelo de GPU (texto libre)"
-                  value={pGpuOther}
-                  onChange={(e) => setPGpuOther(e.target.value)}
-                />
+              <span className="muted">GPU(s):</span>
+              <button className="mini" onClick={addGpuRow}>
+                + Agregar GPU
+              </button>
+              {gpuRows.length === 0 && (
+                <span className="muted">sin GPU: perfil solo CPU/RAM</span>
               )}
-              <input
-                type="number" min="0.5" step="0.5"
-                placeholder="VRAM GB (autofill, editable)"
-                value={pVram}
-                onChange={(e) => setPVram(e.target.value)}
-                disabled={!pGpuModel}
-              />
             </div>
+            {gpuRows.map((r, i) => (
+              <div className="row formrow" key={i}>
+                <span className="muted">GPU {i + 1}:</span>
+                <select
+                  value={r.vendor}
+                  onChange={(e) => onGpuRowVendor(i, e.target.value)}
+                >
+                  <option value="">— vendor —</option>
+                  {cat && Object.keys(cat.gpus).map((v) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+                <select
+                  value={r.model}
+                  onChange={(e) => onGpuRowModel(i, e.target.value)}
+                  disabled={!r.vendor}
+                >
+                  <option value="">— modelo —</option>
+                  {cat &&
+                    (cat.gpus[r.vendor] ?? []).map((g) => (
+                      <option key={g.model} value={g.model}>{g.model}</option>
+                    ))}
+                  {r.vendor && <option value="other">Otro… (manual)</option>}
+                </select>
+                {r.model === 'other' && (
+                  <input
+                    placeholder="Modelo de GPU (texto libre)"
+                    value={r.other}
+                    onChange={(e) => onGpuRowField(i, { other: e.target.value })}
+                  />
+                )}
+                <input
+                  type="number" min="0.5" step="0.5"
+                  placeholder="VRAM GB (autofill, editable)"
+                  value={r.vram}
+                  onChange={(e) => onGpuRowField(i, { vram: e.target.value })}
+                  disabled={!r.model}
+                />
+                <button
+                  className="mini danger"
+                  onClick={() => removeGpuRow(i)}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
             <div className="row formrow">
               <span className="muted">RAM:</span>
               <input
