@@ -1,15 +1,25 @@
-"""Cola de descargas con progreso en vivo (requisitos R5, R6).
+r"""Cola de descargas con progreso en vivo (requisitos R5, R6).
 
-Cada job corre `snapshot_download` en su propio hilo con un `tqdm_class`
-propio que publica eventos (start / progress / done / error) a una cola por
-job; el endpoint SSE (`GET /api/downloads/<id>/events`) los reenvía al
-navegador. Destino: el path de storage elegido (R11): `<storage>\<repo>`.
+Cada job corre el modulo `resumable` del core (hf-downloader) en su propio
+hilo: reanudable byte-level (`.part` + `Range: bytes=N-` + SHA256), archivo
+por archivo. Un callback publica eventos (start / progress / file_done /
+paused / done / error) a una cola por job; el endpoint SSE
+(`GET /api/downloads/<id>/events`) los reenvia al navegador.
 
-Fallback Xet -> LFS idéntico al del core para repos legacy.
+Los glob de los paquetes (R12) se expanden a paths exactos contra el
+tree del repo al hacer `submit` (sin glob no se toca la red).
+
+Pausa: el hilo sale limpio dejando el `.part` (estado `paused`);
+reanudar/reintentar = relanzamiento idempotente — los archivos ya
+completados se saltan (`final.exists()`) y los parciales continúan desde
+el `.part` (lo gestiona el core).
+
+Destino: el path de storage elegido (R11): `<storage>\<repo>`.
 Token: el propio huggingface_hub (env HF_TOKEN o `hf auth login`).
 """
 from __future__ import annotations
 
+import fnmatch
 import queue
 import threading
 import time
@@ -17,12 +27,13 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from huggingface_hub import snapshot_download
+from huggingface_hub import HfApi, get_token
 from huggingface_hub.utils import HfHubHTTPError
+from resumable import DownloadFailed, DownloadPaused, hf_resumable_download
 
 DEFAULT_DEST = Path(r"D:\Downloads")
-MAX_WORKERS = 8
 _PUBLISH_EVERY = 0.25  # s: thottle de eventos de progreso por job
+_GLOB_CHARS = set("*?[")
 
 
 @dataclass
@@ -31,9 +42,11 @@ class Job:
     repo_id: str
     files: list[str]
     dest: str
-    status: str = "queued"  # queued | running | done | error
+    status: str = "queued"  # queued | running | paused | done | error
     error: str | None = None
     events: queue.Queue = field(default_factory=queue.Queue)
+    pause_event: threading.Event = field(default_factory=threading.Event)
+    _thread: threading.Thread | None = None
 
 
 class DownloadManager:
@@ -44,10 +57,13 @@ class DownloadManager:
     def submit(self, repo_id: str, files: list[str],
                dest: Path = DEFAULT_DEST) -> Job:
         job = Job(id=uuid.uuid4().hex[:8], repo_id=repo_id,
-                  files=sorted(files), dest=str(dest))
+                  files=sorted(_expand_patterns(repo_id, files)),
+                  dest=str(dest))
         with self._lock:
             self._jobs[job.id] = job
-        threading.Thread(target=self._run, args=(job,), daemon=True).start()
+        job._thread = threading.Thread(target=self._run, args=(job,),
+                                       daemon=True)
+        job._thread.start()
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -56,110 +72,137 @@ class DownloadManager:
     def list(self) -> list[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.id)
 
+    def pause(self, job_id: str) -> Job:
+        """Pide la pausa: el hilo sale limpio dejando el `.part`.
+
+        Raise:
+            KeyError si no existe el job; ValueError si no esta en
+            running/queued.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        if job.status not in ("running", "queued"):
+            raise ValueError(job.status)
+        job.pause_event.set()
+        return job
+
+    def resume(self, job_id: str) -> Job:
+        """Relanza la descarga de forma idempotente: los archivos
+        completados se saltan y los parciales siguen del `.part`.
+
+        Raise:
+            KeyError si no existe el job; ValueError si no esta en
+            paused/error.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        if job.status not in ("paused", "error"):
+            raise ValueError(job.status)
+        job.pause_event.clear()
+        job.error = None
+        job.status = "running"
+        job._thread = threading.Thread(target=self._run, args=(job,),
+                                       daemon=True)
+        job._thread.start()
+        return job
+
+    # retry = mismo contrato que resume (estados permitidos: paused/error).
+    retry = resume
+
     # ------------------------------------------------------------------ #
 
     def _run(self, job: Job) -> None:
         job.status = "running"
         last = {"t": 0.0}
+        dest_dir = Path(job.dest) / job.repo_id
+        count = len(job.files)
 
         def publish(event: dict) -> None:
             job.events.put(event)
 
         publish({"type": "start", "files": job.files,
-                 "dest": str(Path(job.dest) / job.repo_id)})
+                 "dest": str(dest_dir)})
 
-        class _Progress:
-            """Duck-typing de tqdm para el callback de huggingface_hub.
+        for i, path in enumerate(job.files):
+            # Pausa pedida en un punto de file boundary: salir antes de
+            # tocar el siguiente archivo (la pausa a mitad de archivo la
+            # resuelve el core via stop_event -> DownloadPaused).
+            if job.pause_event.is_set():
+                job.status = "paused"
+                publish({"type": "paused", "path": path})
+                return
 
-            snapshot_download crea 2 barras parent (transfer + reconstruct)
-            con esta clase y les lee/escribe atributos del protocolo tqdm
-            (`n`, `total`, `format_dict`) además de llamar métodos
-            (update/close/refresh/set_description...). Si cambia la versión de
-            huggingface_hub y falta algún método, agregarlo como no-op aquí
-            (NO usar __getattr__: huggingface_hub LEE atributos y espera
-            valores numéricos, no funciones).
-            """
-
-            def __init__(self, total: int | None = None, **kwargs) -> None:
-                self.total = total or 0
-                self.n = 0  # bytes acumulados (huggingface_hub lo lee y compara)
-                self.desc = str(kwargs.get("desc", ""))
-                self._closed = False
-
-            @property
-            def format_dict(self) -> dict:
-                # _set_aggregate_rate_postfix hace bar.format_dict.get("rate")
-                return {"rate": None}
-
-            def update(self, n: int | float | None = 1, **kwargs) -> float:
-                self.n += int(n or 0)
+            def _prog(done: int, total: int, _p: str = path) -> None:
+                # Throttle: el core llama por chunk (1 MiB); publicar
+                # ~4 eventos/s por job es suficiente para la barra.
                 now = time.monotonic()
                 if now - last["t"] >= _PUBLISH_EVERY:
                     last["t"] = now
-                    publish({"type": "progress", "path": self.desc,
-                             "done": self.n, "total": self.total})
-                return self.n
+                    publish({"type": "progress", "path": _p,
+                             "done": done, "total": total})
 
-            def close(self) -> None:
-                if self._closed:
-                    return
-                self._closed = True
-                publish({"type": "progress", "path": self.desc,
-                         "done": self.n, "total": self.total})
-
-            def __enter__(self) -> "_Progress":
-                return self
-
-            def __exit__(self, *exc) -> bool:
-                self.close()
-                return False
-
-            def refresh(self) -> None:
-                pass
-
-            def set_description(self, *a, **k) -> None:
-                pass
-
-            def set_description_str(self, *a, **k) -> None:
-                pass
-
-            def set_postfix(self, *a, **k) -> None:
-                pass
-
-            def set_postfix_str(self, *a, **k) -> None:
-                pass
-
-            def write(self, *a, **k) -> None:
-                pass
-
-        def _go() -> None:
-            snapshot_download(
-                repo_id=job.repo_id,
-                repo_type="model",
-                local_dir=str(Path(job.dest) / job.repo_id),
-                allow_patterns=job.files,
-                max_workers=MAX_WORKERS,
-                tqdm_class=_Progress,
-            )
-
-        try:
             try:
-                _go()
+                hf_resumable_download(job.repo_id, path, dest_dir,
+                                      repo_type="model", progress=_prog,
+                                      stop_event=job.pause_event)
+            except DownloadPaused:
+                job.status = "paused"
+                publish({"type": "paused", "path": path})
+                return
+            except DownloadFailed as e:
+                self._fail(job, path, e)
+                return
             except HfHubHTTPError as e:
-                if "xet-read-token" not in str(e):
-                    raise
-                # Repo legacy (LFS puro): el endpoint Xet devuelve 404
-                import huggingface_hub.file_download as fd
-                publish({"type": "log", "msg": "Xet no disponible; reintentando via LFS..."})
-                fd.is_xet_available = lambda: False
-                _go()
-        except Exception as e:  # noqa: BLE001 — el job debe morir con mensaje
-            job.status = "error"
-            job.error = str(e)
-            publish({"type": "error", "error": str(e)})
-            return
+                # gated / 401 / 404 / 403... (el core deja propagar lo que
+                # no mapea a DownloadFailed)
+                self._fail(job, path, e)
+                return
+            except Exception as e:  # noqa: BLE001 — el job debe morir con mensaje
+                self._fail(job, path, e)
+                return
+            # index = archivos completados hasta este evento (1..count);
+            # incluye los que se saltaron por estar ya completos.
+            publish({"type": "file_done", "path": path,
+                     "index": i + 1, "count": count})
+
         job.status = "done"
-        publish({"type": "done", "dest": str(Path(job.dest) / job.repo_id)})
+        publish({"type": "done", "dest": str(dest_dir)})
+
+    @staticmethod
+    def _fail(job: Job, path: str, e: Exception) -> None:
+        msg = f"{path}: {e}"
+        job.status = "error"
+        job.error = msg
+        job.events.put({"type": "error", "error": msg})
+
+
+def _expand_patterns(repo_id: str, files: list[str],
+                     repo_type: str = "model") -> list[str]:
+    """Expande los glob (paquetes R12) a paths exactos del tree del repo.
+
+    Si la selección no lleva glob, la regresa tal cual sin tocar la red.
+    Un patrón sin coincidencias simplemente no aporta archivos.
+    """
+    has_glob = any(c in f for f in files for c in _GLOB_CHARS)
+    if not has_glob:
+        return list(files)
+    token = get_token()
+    api = HfApi(token=token) if token else HfApi()
+    tree = [
+        item.path
+        for item in api.list_repo_tree(repo_id, repo_type=repo_type,
+                                       recursive=True)
+        if hasattr(item, "path")
+    ]
+    out: list[str] = []
+    for f in files:
+        if any(c in f for c in _GLOB_CHARS):
+            out.extend(p for p in tree if fnmatch.fnmatch(p, f))
+        else:
+            out.append(f)
+    return out
 
 
 # Singleton de la APP (1 usuario, proceso único).

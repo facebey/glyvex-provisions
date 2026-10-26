@@ -322,11 +322,28 @@ export const listDownloads = () =>
     json<{ jobs: { id: string; repo_id: string; status: string; files: number; error: string | null }[] }>(r),
   )
 
+export const pauseDownload = (jobId: string) =>
+  fetch(`/api/downloads/${jobId}/pause`, { method: 'POST' }).then((r) =>
+    json<{ id: string; status: string }>(r),
+  )
+
+export const resumeDownload = (jobId: string) =>
+  fetch(`/api/downloads/${jobId}/resume`, { method: 'POST' }).then((r) =>
+    json<{ id: string; status: string }>(r),
+  )
+
+export const retryDownload = (jobId: string) =>
+  fetch(`/api/downloads/${jobId}/retry`, { method: 'POST' }).then((r) =>
+    json<{ id: string; status: string }>(r),
+  )
+
 export interface JobEvent {
-  type: 'start' | 'progress' | 'log' | 'done' | 'error'
+  type: 'start' | 'progress' | 'log' | 'file_done' | 'paused' | 'done' | 'error'
   path?: string
   done?: number
   total?: number
+  index?: number // file_done: archivos completados hasta este evento (1..count)
+  count?: number // file_done: total de archivos del job
   msg?: string
   error?: string
   dest?: string

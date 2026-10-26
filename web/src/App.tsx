@@ -29,6 +29,9 @@ import {
   listProfiles,
   listStorages,
   openJobEvents,
+  pauseDownload,
+  resumeDownload,
+  retryDownload,
   searchModels,
   submitDownload,
 } from './api'
@@ -124,21 +127,24 @@ export default function App() {
           if (ev.type === 'start') {
             nj.dest = ev.dest
             nj.status = 'running'
+            if (ev.files?.length) nj.filesTotal = ev.files.length
           } else if (ev.type === 'progress') {
-            // desc = "Downloading bytes" / "Reconstructing (incomplete total...)"
-            //        / "Fetching N files"
-            if (ev.path?.startsWith('Fetching')) {
-              // barra "Fetching N files": done = archivos completados
-              if (ev.done !== undefined) nj.filesDone = ev.done
-              if (ev.total) nj.filesTotal = ev.total
-              nj.status = 'running'
-            } else if (ev.path?.startsWith('Reconstructing')) {
-              nj.bytesDone = Math.max(nj.bytesDone, ev.done ?? 0)
-              nj.status = 'running'
-            }
-            // "Downloading bytes" no lleva total: se ignora para la barra
+            // Barra por archivo: done/total = bytes del archivo actual.
+            nj.bytesDone = ev.done ?? 0
+            if (ev.total) nj.bytesTotal = ev.total
+            nj.status = 'running'
+          } else if (ev.type === 'file_done') {
+            // Archivo terminado (o saltado por estar completo): avanza
+            // el contador y la barra arranca en 0 para el siguiente.
+            nj.filesDone = ev.index ?? nj.filesDone
+            if (ev.count) nj.filesTotal = ev.count
+            nj.bytesDone = 0
+            nj.bytesTotal = 0
           } else if (ev.type === 'log') {
             nj.log = [...nj.log, ev.msg ?? ''].slice(-20)
+          } else if (ev.type === 'paused') {
+            nj.status = 'paused'
+            setTimeout(() => closeJob(id), 500)
           } else if (ev.type === 'done') {
             nj.status = 'done'
             nj.dest = ev.dest ?? nj.dest
@@ -177,7 +183,13 @@ export default function App() {
     listDownloads()
       .then((d) => {
         for (const j of d.jobs) {
-          if (j.status === 'running' || j.status === 'queued') {
+          // paused también se re-suscribe: el stream re-emite el historial
+          // y el evento `paused` deja la tarjeta en su estado correcto.
+          if (
+            j.status === 'running' ||
+            j.status === 'queued' ||
+            j.status === 'paused'
+          ) {
             attachJob(j.id, j.repo_id, j.files)
           }
         }
@@ -541,6 +553,47 @@ export default function App() {
       setBusy(null)
     }
   }
+
+  const doPause = async (id: string) => {
+    try {
+      await pauseDownload(id)
+      // el SSE manda `paused` de todas formas (y cierra el stream); esto
+      // solo refleja el estado sin esperar al evento
+      setJobs((js) =>
+        js.map((j) => (j.id === id ? { ...j, status: 'paused' } : j)),
+      )
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  const doResumeOrRetry = async (
+    id: string,
+    repoId: string,
+    filesTotal: number,
+    fn: () => Promise<unknown>,
+  ) => {
+    try {
+      await fn()
+      setJobs((js) =>
+        js.map((j) =>
+          j.id === id ? { ...j, status: 'running', error: null } : j,
+        ),
+      )
+      // Re-suscripción: la cola del job sigue viva y el nuevo stream
+      // re-emite start/progress desde el punto actual.
+      closeJob(id)
+      attachJob(id, repoId, filesTotal)
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  const doResume = (id: string, repoId: string, filesTotal: number) =>
+    doResumeOrRetry(id, repoId, filesTotal, () => resumeDownload(id))
+
+  const doRetry = (id: string, repoId: string, filesTotal: number) =>
+    doResumeOrRetry(id, repoId, filesTotal, () => retryDownload(id))
 
   const gpus = hw?.gpus ?? []
 
@@ -1347,8 +1400,26 @@ export default function App() {
                   {j.filesDone}/{j.filesTotal} archivos
                   {j.bytesTotal > 0 && ` · ${fmtBytes(j.bytesDone)} / ${fmtBytes(j.bytesTotal)}`}
                 </span>
+                {(j.status === 'running' || j.status === 'queued') && (
+                  <button className="mini" style={{ marginLeft: 'auto' }}
+                    onClick={() => doPause(j.id)}>
+                    Pausar
+                  </button>
+                )}
+                {j.status === 'paused' && (
+                  <button className="mini" style={{ marginLeft: 'auto' }}
+                    onClick={() => doResume(j.id, j.repo_id, j.filesTotal)}>
+                    Reanudar
+                  </button>
+                )}
+                {j.status === 'error' && (
+                  <button className="mini" style={{ marginLeft: 'auto' }}
+                    onClick={() => doRetry(j.id, j.repo_id, j.filesTotal)}>
+                    Reintentar
+                  </button>
+                )}
               </div>
-              {j.status === 'running' || j.status === 'queued' ? (
+              {j.status === 'running' || j.status === 'queued' || j.status === 'paused' ? (
                 <>
                   <div className="bar">
                     <div className="bar-fill" style={{ width: `${pctBytes}%` }} />

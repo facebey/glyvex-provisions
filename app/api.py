@@ -191,7 +191,8 @@ def delete_package(storage_id: str, package_id: str) -> dict:
 @router.post("/storage/{storage_id}/packages/{package_id}/download")
 def download_package(storage_id: str, package_id: str) -> dict:
     """Descarga el paquete: 1 job por repo único, destino = el storage del
-    paquete. Los glob del manifiesto pasan directo a allow_patterns."""
+    paquete. Los glob del manifiesto se expanden a paths exactos en
+    `dl.manager.submit` (R12)."""
     s = storage.get_storage(storage_id)
     if s is None:
         raise HTTPException(404, f"storage inexistente: {storage_id}")
@@ -314,7 +315,10 @@ def download_events(job_id: str) -> StreamingResponse:
                 yield ": keepalive\n\n"
                 continue
             yield f"data: {json.dumps(ev)}\n\n"
-            if ev["type"] in ("done", "error"):
+            # paused también termina el stream: el frontend cierra el
+            # EventSource y al reanudar se re-suscribe (un solo
+            # consumidor de la cola por vez, sin "generador fantasma").
+            if ev["type"] in ("done", "error", "paused"):
                 break
 
     return StreamingResponse(
@@ -322,3 +326,35 @@ def download_events(job_id: str) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/downloads/{job_id}/pause")
+def pause_download(job_id: str) -> dict:
+    try:
+        job = dl.manager.pause(job_id)
+    except KeyError:
+        raise HTTPException(404, "job inexistente")
+    except ValueError as e:
+        raise HTTPException(409, f"no se puede pausar un job en estado {e!r}")
+    return {"id": job.id, "status": job.status}
+
+
+@router.post("/downloads/{job_id}/resume")
+def resume_download(job_id: str) -> dict:
+    try:
+        job = dl.manager.resume(job_id)
+    except KeyError:
+        raise HTTPException(404, "job inexistente")
+    except ValueError as e:
+        raise HTTPException(
+            409,
+            f"no se puede reanudar un job en estado {e!r} "
+            "(solo paused o error)",
+        )
+    return {"id": job.id, "status": job.status}
+
+
+@router.post("/downloads/{job_id}/retry")
+def retry_download(job_id: str) -> dict:
+    """Alias de resume: relanza un job en paused/error (idempotente)."""
+    return resume_download(job_id)

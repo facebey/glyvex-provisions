@@ -8,9 +8,9 @@
   {repo_id, file} (archivo exacto del repo) o {repo_id, pattern} (glob,
   p. ej. "*Q4_K_M.gguf" para tomar TODAS las cuantizaciones Q4_K_M).
 - Descargar un paquete = 1 job por repo único (destino = el storage del
-  paquete). Los glob pasan directo a snapshot_download(allow_patterns=...),
-  que resuelve el match contra el árbol del repo; la app no necesita hacer
-  un listado extra por red.
+  paquete). Los glob se expanden a paths exactos contra el tree del repo en
+  `downloads.submit` (solo si hay glob: sin `*?[` no se toca la red); el
+  downloader del core recibe la lista ya resuelta.
 - profile/scenario son metadatos del escenario: no afectan la descarga.
 """
 from __future__ import annotations
