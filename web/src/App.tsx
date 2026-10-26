@@ -60,6 +60,7 @@ interface GpuRow {
 
 const REGIME_LABELS: Record<Regime, string> = {
   gpu: 'Solo GPU (VRAM)',
+  multi: 'Multi-GPU (suma VRAM)',
   offload: 'Offload GPU+RAM',
   cpu: 'Solo CPU (RAM)',
 }

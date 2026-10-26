@@ -1,7 +1,7 @@
 // Cliente del backend de Glyvex Provisions (FastAPI en 127.0.0.1:8321, vía proxy Vite).
 // Solo se usa contra localhost; sin telemetría.
 
-export type Regime = 'gpu' | 'offload' | 'cpu'
+export type Regime = 'gpu' | 'multi' | 'offload' | 'cpu'
 export type FitStatus = 'ok' | 'tight' | 'no' | 'na'
 
 export interface Gpu {
