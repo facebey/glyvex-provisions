@@ -6,7 +6,8 @@ Semáforo (referencia de UX: panel "Hardware compatibility" de huggingface.co):
   no    por encima
 
 Regímenes (a elección del usuario, R2):
-  gpu     -> compara contra la VRAM de la GPU principal (v1; multi-GPU va en fase 2/3)
+  gpu     -> compara contra la VRAM de la GPU principal (la de más VRAM del
+             perfil; multi-GPU sumando capacidades va en fase 2/3)
   offload -> el modelo vive en RAM y capas en GPU: compara contra RAM total
   cpu     -> todo en CPU: RAM total
 """
@@ -22,7 +23,9 @@ TIGHT_FRAC = 0.95
 def capacity_bytes(regime: str, hw: dict) -> int:
     if regime == "gpu":
         gpus = hw.get("gpus") or []
-        return gpus[0]["vram_total_bytes"] if gpus else 0
+        # GPU principal = la de más VRAM: orden de WMI no es fiable (iGPU
+        # primero) y un perfil manual puede listar varias GPUs.
+        return max((g["vram_total_bytes"] for g in gpus), default=0)
     return hw["ram_total_bytes"]
 
 
