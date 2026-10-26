@@ -194,7 +194,7 @@ def _expand_patterns(repo_id: str, files: list[str],
         item.path
         for item in api.list_repo_tree(repo_id, repo_type=repo_type,
                                        recursive=True)
-        if hasattr(item, "path")
+        if hasattr(item, "path") and hasattr(item, "size")  # sin RepoFolder
     ]
     out: list[str] = []
     for f in files:
