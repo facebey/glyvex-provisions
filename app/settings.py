@@ -9,11 +9,12 @@ Semáforo (aplicado por fit.estimate según estos valores):
   ok    <= ok_frac  de la capacidad   (verde)
   tight <= tight_frac de la capacidad (naranja); siempre ok_frac <= tight_frac
   no    por encima                    (rojo)
-  needed = tamaño * (1 + margen/100)  — cubre KV cache + overhead de proceso
+  needed = tamaño * (1 + margen/100) en v1 (el margen cubre KV + overhead);
+           en v2 el margen cubre solo buffers y la KV GGUF se suma aparte
 
-`context` (tokens de contexto) es la base del cálculo KV de la estimación
-v2 por metadatos GGUF (U6-4): se persiste y sirve, pero todavía no afecta
-al semáforo v1 (que usa solo tamaño × margen).
+`context` (tokens de contexto) define la KV cache que la estimación v2
+(app/gguf + fit.estimate_v2) suma a los archivos GGUF; sin metadatos
+útiles la estimación degrada a v1 (tamaño × margen).
 """
 from __future__ import annotations
 

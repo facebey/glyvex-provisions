@@ -60,6 +60,10 @@ export interface FileRow {
   ratio: number | null
   status: FitStatus
   detail?: string
+  // U6-4: 2 = pesos+KV desde metadatos GGUF (kv_bytes = KV para el contexto
+  // elegido); 1 o ausente = tamaño x margen (v1).
+  fit_version?: number
+  kv_bytes?: number
 }
 
 export interface Group {
