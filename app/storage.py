@@ -27,7 +27,9 @@ from pydantic import BaseModel, Field
 
 from hf_down import MMPROJ_RE, MTP_RE, QUANT_RE, WEIGHT_EXTS
 
-STORAGE_FILE = Path(__file__).resolve().parent.parent / "data" / "storage.json"
+from .paths import DATA_DIR
+
+STORAGE_FILE = DATA_DIR / "storage.json"
 
 MAX_FILES = 50_000  # cap de seguridad para storages gigantes (NAS)
 

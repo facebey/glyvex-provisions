@@ -1,0 +1,6 @@
+# Tauri / U7 (empaquetado)
+/target/
+/resources/
+/updater/private.key
+/updater/password.txt
+/gen/schemas/

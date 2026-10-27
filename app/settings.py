@@ -23,7 +23,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-SETTINGS_FILE = Path(__file__).resolve().parent.parent / "data" / "settings.json"
+from .paths import DATA_DIR
+
+SETTINGS_FILE = DATA_DIR / "settings.json"
 
 CONTEXTS = (4096, 8192, 32768)  # opciones de contexto (4k/8k/32k)
 DEFAULTS: dict = {
