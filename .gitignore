@@ -17,3 +17,6 @@ web/*.local
 # Entorno / secretos (el token HF vive en HF_TOKEN, nunca aqui)
 .env
 .env.*
+
+# Material de diseno (mockups/previews de estilo): no forma parte de la app
+Design/
