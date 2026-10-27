@@ -33,3 +33,27 @@ cd web
 npm install
 npm run dev
 ```
+
+## Producción (instalador Windows, U7)
+
+`build.ps1` en la raíz ejecuta el pipeline completo:
+
+1. `npm run build` → `web/dist` (SPA).
+2. PyInstaller → `packaging/dist/provisions-backend/` (sidecar FastAPI onedir;
+   empaqueta el SPA como `_internal/web-dist` y lo sirve él mismo).
+3. Junction `web/src-tauri/resources/provisions-backend` → el dist del sidecar.
+4. `tauri build` → instalador **NSIS** + artefacts del updater firmados
+   (`web/src-tauri/target/release/bundle/nsis/`).
+
+La app instalada levanta el sidecar al abrir (reutiliza uno ya vivo en la
+escalera 8321…8330) y la webview se redirige al puerto real; muere al cerrar
+la ventana. Datos de usuario en `%LOCALAPPDATA%\glyvex-provisions\data`
+(sobreviven a reinstalaciones). Deps de empaquetado (solo build-time):
+PyInstaller en el `.venv` + `@tauri-apps/cli` (devDep) + Rust/cargo.
+
+Firma del updater: `web/src-tauri/updater/` (`private.key` + `password.txt`,
+gitignored — perderlos invalida las updates firmadas; la pública va embebida en
+`tauri.conf.json`).
+
+`tauri:dev` (Vite lo levanta Tauri) y `tauri:dev:reuse` (usa el `npm run dev`
+que ya tengas en 8331) para desarrollar dentro de la shell.

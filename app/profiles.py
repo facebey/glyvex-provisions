@@ -23,7 +23,9 @@ GB = 1024 ** 3
 AUTO_ID = "local"
 AUTO_NAME = "Esta máquina (auto)"
 
-PROFILES_FILE = Path(__file__).resolve().parent.parent / "data" / "profiles.json"
+from .paths import DATA_DIR
+
+PROFILES_FILE = DATA_DIR / "profiles.json"
 
 
 class GpuSpec(BaseModel):
