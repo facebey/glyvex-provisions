@@ -12,6 +12,7 @@ import {
   type ProfileGpu,
   type Regime,
   type RepoData,
+  type Settings,
   type Storage,
   addPackage,
   addProfile,
@@ -25,6 +26,7 @@ import {
   getHardware,
   getLibrary,
   getRepo,
+  getSettings,
   listDownloads,
   listPackages,
   listProfiles,
@@ -33,6 +35,7 @@ import {
   pauseDownload,
   resumeDownload,
   retryDownload,
+  saveSettings,
   searchModels,
   submitDownload,
 } from './api'
@@ -63,6 +66,12 @@ const REGIME_LABELS: Record<Regime, string> = {
   multi: 'Multi-GPU (suma VRAM)',
   offload: 'Offload GPU+RAM',
   cpu: 'Solo CPU (RAM)',
+}
+
+// Formato de porcentaje para el formulario de Ajustes (U6-3): quita el
+// ruido de punto flotante (0.95*100 -> "95", 82.5 -> "82.5").
+function fmtPct(n: number): string {
+  return String(+(Math.round(n * 10) / 10))
 }
 
 export default function App() {
@@ -108,6 +117,12 @@ export default function App() {
   const [pkgRows, setPkgRows] = useState<{ repo: string; spec: string }[]>([
     { repo: '', spec: '' },
   ])
+  // Ajustes persistentes (U6-3): umbrales del semáforo, margen, contexto.
+  // En la UI los umbrales y el margen se manejan como porcentajes.
+  const [adjOk, setAdjOk] = useState('80')
+  const [adjTight, setAdjTight] = useState('95')
+  const [adjMargin, setAdjMargin] = useState('5')
+  const [adjContext, setAdjContext] = useState('8192')
   const eventsRef = useRef<Map<string, EventSource>>(new Map())
 
   const closeJob = useCallback((id: string) => {
@@ -188,6 +203,14 @@ export default function App() {
     getCatalog().then(setCat).catch(() => {
       /* catálogo no llega: la cascada queda vacía, sigue siendo usable */
     })
+    getSettings().then((s) => {
+      setAdjOk(fmtPct(s.ok_frac * 100))
+      setAdjTight(fmtPct(s.tight_frac * 100))
+      setAdjMargin(fmtPct(s.margin_pct))
+      setAdjContext(String(s.context))
+    }).catch(() => {
+      /* backend caído: el formulario queda con los defaults visibles */
+    })
     listDownloads()
       .then((d) => {
         for (const j of d.jobs) {
@@ -247,6 +270,42 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regime, profileId])
+
+  // Ajustes (U6-3): persistar y re-calcular la tabla abierta con los
+  // nuevos umbrales/margen (el backend aplica los valores a `fit`).
+  const doSaveSettings = async () => {
+    const body: Settings = {
+      context: parseInt(adjContext, 10),
+      margin_pct: parseFloat(adjMargin),
+      ok_frac: parseFloat(adjOk) / 100,
+      tight_frac: parseFloat(adjTight) / 100,
+    }
+    if (
+      !Number.isFinite(body.context) ||
+      !Number.isFinite(body.margin_pct) ||
+      !Number.isFinite(body.ok_frac) ||
+      !Number.isFinite(body.tight_frac)
+    ) {
+      setError('Ajustes inválidos: completá los cuatro valores numéricos.')
+      return
+    }
+    setBusy('settings')
+    setError(null)
+    try {
+      const s = await saveSettings(body)
+      setAdjOk(fmtPct(s.ok_frac * 100))
+      setAdjTight(fmtPct(s.tight_frac * 100))
+      setAdjMargin(fmtPct(s.margin_pct))
+      setAdjContext(String(s.context))
+      if (repo) {
+        getRepo(repo.repo_id, regime, profileId).then(setRepo).catch(() => {})
+      }
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   // Adición 4d: cascada vendor → modelo (VRAM/hilos autofillados del catálogo)
   const onCpuVendor = (v: string) => {
@@ -984,6 +1043,73 @@ export default function App() {
             ))}
           </div>
         )}
+      </section>
+
+      {/* Ajustes persistentes (U6-3): semáforo + margen + contexto */}
+      <section className="panel settings">
+        <h2>Ajustes (semáforo y contexto)</h2>
+        <div className="row profilebar">
+          <span className="muted">
+            Umbrales del semáforo de la tabla de archivos y margen de seguridad
+            (KV cache + overhead). El contexto se guarda para la estimación v2
+            (KV por metadatos GGUF) y aún no cambia el semáforo. Se aplican de
+            inmediato a la tabla abierta.
+          </span>
+        </div>
+        <div className="row addprofile">
+          <label className="dest">
+            Verde ≤ %
+            <input
+              type="number"
+              min={1}
+              max={100}
+              step={1}
+              value={adjOk}
+              onChange={(e) => setAdjOk(e.target.value)}
+            />
+          </label>
+          <label className="dest">
+            Naranja ≤ %
+            <input
+              type="number"
+              min={1}
+              max={100}
+              step={1}
+              value={adjTight}
+              onChange={(e) => setAdjTight(e.target.value)}
+            />
+          </label>
+          <label className="dest">
+            Margen %
+            <input
+              type="number"
+              min={0}
+              max={50}
+              step={0.5}
+              value={adjMargin}
+              onChange={(e) => setAdjMargin(e.target.value)}
+            />
+          </label>
+          <label className="dest">
+            Contexto:
+            <select
+              name="adjcontext"
+              value={adjContext}
+              onChange={(e) => setAdjContext(e.target.value)}
+            >
+              <option value="4096">4k</option>
+              <option value="8192">8k</option>
+              <option value="32768">32k</option>
+            </select>
+          </label>
+          <button
+            className="primary"
+            disabled={busy === 'settings'}
+            onClick={doSaveSettings}
+          >
+            {busy === 'settings' ? 'Guardando…' : 'Guardar ajustes'}
+          </button>
+        </div>
       </section>
 
       {/* Storage y librería local (R11 / R9) */}
