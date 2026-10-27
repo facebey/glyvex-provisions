@@ -1050,9 +1050,11 @@ export default function App() {
         <h2>Ajustes (semáforo y contexto)</h2>
         <div className="row profilebar">
           <span className="muted">
-            Umbrales del semáforo de la tabla de archivos y margen de seguridad
-            (KV cache + overhead). El contexto se guarda para la estimación v2
-            (KV por metadatos GGUF) y aún no cambia el semáforo. Se aplican de
+            Umbrales del semáforo de la tabla de archivos y margen para buffers
+            de cómputo. El contexto (4k/8k/32k) define la KV cache que la
+            estimación v2 suma en archivos GGUF (metadatos reales leídos de la
+            cabecera del modelo); sin metadatos útiles (difusión, mmproj,
+            arquitecturas raras) degrada a tamaño × margen. Se aplican de
             inmediato a la tabla abierta.
           </span>
         </div>
@@ -1497,7 +1499,7 @@ export default function App() {
                 </th>
                 <th>Cuantización</th>
                 <th>Tamaño</th>
-                <th>Estima con overhead</th>
+                <th>Estima (margen + KV GGUF)</th>
                 <th className="light">¿Cabe?</th>
                 <th>Archivo</th>
               </tr>
@@ -1525,7 +1527,19 @@ export default function App() {
                     </button>
                   </td>
                   <td className="num">{fmtBytes(r.size)}</td>
-                  <td className="num muted">{fmtBytes(r.needed_bytes)}</td>
+                  <td className="num muted">
+                    {fmtBytes(r.needed_bytes)}
+                    {r.fit_version === 2 && (
+                      <span
+                        className="chip tiny"
+                        title={`estimación v2: pesos + KV cache real (${fmtBytes(
+                          r.kv_bytes ?? 0,
+                        )}) para el contexto elegido; detalle en el semáforo`}
+                      >
+                        v2·GGUF
+                      </span>
+                    )}
+                  </td>
                   <td>
                     {r.status === 'na' ? (
                       <span className="dot na" title={r.detail}>—</span>

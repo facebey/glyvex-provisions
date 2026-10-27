@@ -18,7 +18,7 @@ from hf_down import (MMPROJ_RE, MTP_RE, QUANT_RE, SUPPORT_EXTS,
 
 from . import catalog
 from . import downloads as dl
-from . import fit, hfsearch
+from . import fit, gguf, hfsearch
 from . import packages
 from . import profiles
 from . import settings as st
@@ -254,15 +254,30 @@ def repo_files(repo_id: str, regime: str = "gpu", profile: str = "local") -> dic
             "define HF_TOKEN (o ejecuta `hf auth login`).",
         ) from None
     hw = profiles.caps_for(profile)
-    # Ajustes del usuario (U6-3): umbrales y margen del semáforo.
+    # Ajustes del usuario (U6-3): umbrales y margen del semáforo;
+    # el contexto alimenta la estimación v2 de KV (U6-4).
     limits = st.limits()
+    context = st.get_settings()["context"]
+    # v2: la cabecera GGUF se sondea UNA vez por repo (los quant comparten
+    # hparams). Los mmproj (visor, arquitectura clip/mt5) y no-GGUF van por
+    # v1: la KV de atención del LLM no les aplica.
+    gg_paths = [f["path"] for f in data["files"] if f["ext"] == ".gguf"
+                and not MMPROJ_RE.search(f["path"].rsplit("/", 1)[-1])]
+    gg_meta = gguf.repo_gguf_meta(repo_id, gg_paths) if gg_paths else None
     rows = []
     aux = []
     for f in data["files"]:
         if f["ext"] in WEIGHT_EXTS:
+            # Los mmproj (visor clip/mt5) van por v1 aunque el repo tenga meta:
+            # la KV de atención del LLM no les aplica.
+            if (f["ext"] == ".gguf" and gg_meta is not None
+                    and not MMPROJ_RE.search(f["path"].rsplit("/", 1)[-1])):
+                est = fit.estimate_v2(f["size"], regime, hw, limits,
+                                      gg_meta, context)
+            else:
+                est = fit.estimate(f["size"], regime, hw, limits)
             rows.append({"path": f["path"], "label": _file_label(f["path"]),
-                         "size": f["size"],
-                         **fit.estimate(f["size"], regime, hw, limits)})
+                         "size": f["size"], **est})
         else:
             # No-peso: se lista (model card, config, otros) pero sin semáforo.
             aux.append({"path": f["path"], "label": _aux_label(
