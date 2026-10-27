@@ -37,6 +37,8 @@ from huggingface_hub import HfApi, get_token
 from huggingface_hub.utils import HfHubHTTPError
 from resumable import DownloadFailed, DownloadPaused, hf_resumable_download
 
+from . import hfsearch
+
 DEFAULT_DEST = Path(r"D:\Downloads")
 _PUBLISH_EVERY = 0.25  # s: thottle de eventos de progreso por job
 _GLOB_CHARS = set("*?[")
@@ -164,7 +166,12 @@ class DownloadManager:
                 continue
             except HfHubHTTPError as e:
                 # gated / 401 / 404 / 403... (el core deja propagar lo que
-                # no mapea a DownloadFailed)
+                # no mapea a DownloadFailed). Para 401/403 usamos el mismo
+                # mensaje accionable que la tabla (U6-5), no el crudo de HF.
+                status = getattr(getattr(e, "response", None), "status_code",
+                                 None) or getattr(e, "status", None)
+                if status in (401, 403):
+                    e = hfsearch.GatedError(job.repo_id, status)
                 self._file_error(job, path, e)
                 continue
             except Exception as e:  # noqa: BLE001 — registro y sigo con el resto
@@ -192,9 +199,15 @@ class DownloadManager:
 
         El aviso viaja como evento `log` (la UI ya lo muestra en la
         tarjeta); el resumen final sale por el evento `error`.
+        Para GatedError usamos el mensaje accionable amigable (U6-5) en
+        lugar del crudo `repo gated/privado ... (HTTP 401)`.
         """
-        job.errors.append(f"{path}: {e}")
-        job.events.put({"type": "log", "msg": f"sin descargar {path}: {e}"})
+        if isinstance(e, hfsearch.GatedError):
+            msg = hfsearch.friendly_message(e.repo_id, e.status)
+        else:
+            msg = str(e)
+        job.errors.append(f"{path}: {msg}")
+        job.events.put({"type": "log", "msg": f"sin descargar {path}: {msg}"})
 
 
 def _expand_patterns(repo_id: str, files: list[str],

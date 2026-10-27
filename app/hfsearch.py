@@ -24,6 +24,16 @@ _ID_RE = re.compile(r"^[\w.-]+(?:/[\w.-]+)+$")
 class GatedError(Exception):
     """Repo gated/privado: falta aceptar términos y/o token."""
 
+    def __init__(self, repo_id: str, status: int | None = None) -> None:
+        super().__init__(f"repo gated/privado: {repo_id} (HTTP {status})")
+        self.repo_id = repo_id
+        self.status = status  # 401 o 403 reales, para afinar el mensaje (U6-5)
+
+
+def has_token() -> bool:
+    """True si hay token visible (HF_TOKEN del proceso o cache `hf auth login`)."""
+    return bool(get_token())
+
 
 def _token() -> str | None:
     return get_token()  # HF_TOKEN env o cache local; None si no hay
@@ -102,7 +112,7 @@ def repo_files(repo_id: str) -> dict:
                  if hasattr(i, "size")]  # RepoFile siempre trae .size
     except HfHubHTTPError as e:
         if _status_of(e) in (401, 403):
-            raise GatedError() from e
+            raise GatedError(repo_id, _status_of(e)) from e
         raise
     return {
         "repo_id": repo_id,
@@ -112,3 +122,31 @@ def repo_files(repo_id: str) -> dict:
             for g in group_files(files)
         ],
     }
+
+
+def friendly_message(repo_id: str, status: int | None) -> str:
+    """Mensaje accionable para 401/403 (U6-5: '401 amigable').
+
+    Distingue los dos casos reales que ve el usuario:
+      - sin token visible: falta definir HF_TOKEN o `hf auth login`
+        (y avisar que el token solo se ve tras reiniciar el backend, porque
+        las env vars de Windows son snapshot al arrancar el proceso — §7.13);
+      - con token: el token existe pero no tiene acceso al repo (términos
+        sin aceptar, repo privado, o token de otra cuenta).
+    Nunca muestra el valor del token.
+    """
+    head = (f"El repositorio {repo_id} es gated o privado y tu acceso no está "
+            "habilitado")
+    if status == 404:  # por si algún llamador lo trata como gated
+        return f"No se encontró el repositorio {repo_id} (¿id incorrecto o borrado?)."
+    if not has_token():
+        return (head + ". Pasos: 1) abre huggingface.co/" + repo_id +
+                " y acepta los términos si el repo los tiene; 2) configura tu "
+                "token de Hugging Face (HF_TOKEN o `hf auth login`); 3) reinicia "
+                "el backend (Abrir Provisions de nuevo), porque el token se lee "
+                "solo al arrancar el proceso.")
+    return (head + ". Tu token está configurado pero este repo no lo autoriza. "
+            "Pasos: 1) abre huggingface.co/" + repo_id +
+            " con la cuenta de ese token y acepta los términos (o comparte el "
+            "repo); 2) si el token se configuró DESPUÉS de abrir Provisions, "
+            "reinicia el backend: el token se lee solo al arrancar el proceso.")
