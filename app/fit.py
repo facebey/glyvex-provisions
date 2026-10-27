@@ -14,6 +14,10 @@ Regímenes (a elección del usuario, R2):
              capas GGUF); NO lo uses para modelos de difusión
   offload -> el modelo vive en RAM y capas en GPU: compara contra RAM total
   cpu     -> todo en CPU: RAM total
+
+Los umbrales y el margen son ajustables en Ajustes (U6-3, app/settings):
+estimate() recibe `limits` con overhead/ok_frac/tight_frac; los valores del
+módulo son solo el default histórico (identico a lo que trae settings).
 """
 from __future__ import annotations
 
@@ -35,9 +39,17 @@ def capacity_bytes(regime: str, hw: dict) -> int:
     return hw["ram_total_bytes"]
 
 
-def estimate(size_bytes: int, regime: str, hw: dict) -> dict:
-    """Cabe (o no) un archivo/peso de `size_bytes` bytes bajo `regime`."""
-    needed = int(size_bytes * OVERHEAD)
+def estimate(size_bytes: int, regime: str, hw: dict,
+             limits: dict | None = None) -> dict:
+    """Cabe (o no) un archivo/peso de `size_bytes` bytes bajo `regime`.
+
+    `limits` (U6-3): valores de app/settings — claves opcionales overhead,
+    ok_frac, tight_frac. Sin `limits` se usan los defaults de este módulo.
+    """
+    ov = (limits or {}).get("overhead", OVERHEAD)
+    ok_frac = (limits or {}).get("ok_frac", OK_FRAC)
+    tight_frac = (limits or {}).get("tight_frac", TIGHT_FRAC)
+    needed = int(size_bytes * ov)
     cap = capacity_bytes(regime, hw)
     if cap <= 0:
         detail = ("el perfil no tiene GPU" if regime in ("gpu", "multi")
@@ -45,9 +57,9 @@ def estimate(size_bytes: int, regime: str, hw: dict) -> dict:
         return {"needed_bytes": needed, "capacity_bytes": 0,
                 "ratio": None, "status": "no", "detail": detail}
     ratio = needed / cap
-    if ratio <= OK_FRAC:
+    if ratio <= ok_frac:
         status = "ok"
-    elif ratio <= TIGHT_FRAC:
+    elif ratio <= tight_frac:
         status = "tight"
     else:
         status = "no"

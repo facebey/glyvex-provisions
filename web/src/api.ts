@@ -112,6 +112,15 @@ export interface ProfileIn {
   ram_speed_mhz?: number | null
 }
 
+// Ajustes persistentes (U6-3): umbrales del semáforo, margen y contexto.
+// `context` se guarda para la estimación v2 (KV por metadatos GGUF, U6-4).
+export interface Settings {
+  context: number
+  margin_pct: number
+  ok_frac: number
+  tight_frac: number
+}
+
 // Catálogo de hardware (adición 4d): modelos representativos por vendor +
 // VRAM mapeada por GPU + velocidades de RAM por tipo.
 export interface CatalogCpu {
@@ -257,6 +266,16 @@ export const deleteProfile = (id: string) =>
   fetch(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(
     (r) => json<{ ok: boolean }>(r),
   )
+
+export const getSettings = () =>
+  fetch('/api/settings').then((r) => json<Settings>(r))
+
+export const saveSettings = (body: Settings) =>
+  fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Settings>(r))
 
 export const listStorages = () =>
   fetch('/api/storage').then((r) => json<{ storages: Storage[] }>(r))

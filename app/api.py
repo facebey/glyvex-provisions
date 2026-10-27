@@ -21,6 +21,7 @@ from . import downloads as dl
 from . import fit, hfsearch
 from . import packages
 from . import profiles
+from . import settings as st
 from . import storage
 from .hardware import detect
 
@@ -109,6 +110,21 @@ def delete_profile(profile_id: str) -> dict:
     if not profiles.delete_profile(profile_id):
         raise HTTPException(404, f"perfil inexistente: {profile_id}")
     return {"ok": True}
+
+
+# ---- Ajustes persistentes (U6-3): semáforo + margen + contexto -------------
+
+@router.get("/settings")
+def get_settings() -> dict:
+    return st.get_settings()
+
+
+@router.put("/settings")
+def put_settings(body: st.SettingsIn) -> dict:
+    try:
+        return st.save_settings(body)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
 
 
 # ---- Storage multi-path (R11) + librería local (R9) -------------------------
@@ -238,13 +254,15 @@ def repo_files(repo_id: str, regime: str = "gpu", profile: str = "local") -> dic
             "define HF_TOKEN (o ejecuta `hf auth login`).",
         ) from None
     hw = profiles.caps_for(profile)
+    # Ajustes del usuario (U6-3): umbrales y margen del semáforo.
+    limits = st.limits()
     rows = []
     aux = []
     for f in data["files"]:
         if f["ext"] in WEIGHT_EXTS:
             rows.append({"path": f["path"], "label": _file_label(f["path"]),
                          "size": f["size"],
-                         **fit.estimate(f["size"], regime, hw)})
+                         **fit.estimate(f["size"], regime, hw, limits)})
         else:
             # No-peso: se lista (model card, config, otros) pero sin semáforo.
             aux.append({"path": f["path"], "label": _aux_label(
