@@ -247,12 +247,8 @@ def repo_files(repo_id: str, regime: str = "gpu", profile: str = "local") -> dic
         raise HTTPException(404, f"perfil inexistente: {profile}")
     try:
         data = hfsearch.repo_files(repo_id)
-    except hfsearch.GatedError:
-        raise HTTPException(
-            403,
-            "Repo gated/privado: acepta los términos en huggingface.co y "
-            "define HF_TOKEN (o ejecuta `hf auth login`).",
-        ) from None
+    except hfsearch.GatedError as e:
+        raise HTTPException(403, hfsearch.friendly_message(e.repo_id, e.status)) from None
     hw = profiles.caps_for(profile)
     # Ajustes del usuario (U6-3): umbrales y margen del semáforo;
     # el contexto alimenta la estimación v2 de KV (U6-4).
