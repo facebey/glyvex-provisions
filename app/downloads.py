@@ -14,6 +14,12 @@ reanudar/reintentar = relanzamiento idempotente — los archivos ya
 completados se saltan (`final.exists()`) y los parciales continúan desde
 el `.part` (lo gestiona el core).
 
+Error por archivo: NO aborta el job. Se registra y el job continúa con el
+resto (avisos `log` en vivo); al terminar, si hubo fallados el job queda
+en `error` con la lista. Los fallos permanentes (p.ej. un nombre reservado
+por Windows) vuelven a fallar rápido en cada reintento, sin tocar la red,
+y no bloquean a los demás archivos.
+
 Destino: el path de storage elegido (R11): `<storage>\<repo>`.
 Token: el propio huggingface_hub (env HF_TOKEN o `hf auth login`).
 """
@@ -44,6 +50,7 @@ class Job:
     dest: str
     status: str = "queued"  # queued | running | paused | done | error
     error: str | None = None
+    errors: list[str] = field(default_factory=list)  # fallos por archivo
     events: queue.Queue = field(default_factory=queue.Queue)
     pause_event: threading.Event = field(default_factory=threading.Event)
     _thread: threading.Thread | None = None
@@ -102,6 +109,7 @@ class DownloadManager:
             raise ValueError(job.status)
         job.pause_event.clear()
         job.error = None
+        job.errors.clear()
         job.status = "running"
         job._thread = threading.Thread(target=self._run, args=(job,),
                                        daemon=True)
@@ -152,30 +160,41 @@ class DownloadManager:
                 publish({"type": "paused", "path": path})
                 return
             except DownloadFailed as e:
-                self._fail(job, path, e)
-                return
+                self._file_error(job, path, e)
+                continue
             except HfHubHTTPError as e:
                 # gated / 401 / 404 / 403... (el core deja propagar lo que
                 # no mapea a DownloadFailed)
-                self._fail(job, path, e)
-                return
-            except Exception as e:  # noqa: BLE001 — el job debe morir con mensaje
-                self._fail(job, path, e)
-                return
+                self._file_error(job, path, e)
+                continue
+            except Exception as e:  # noqa: BLE001 — registro y sigo con el resto
+                self._file_error(job, path, e)
+                continue
             # index = archivos completados hasta este evento (1..count);
             # incluye los que se saltaron por estar ya completos.
             publish({"type": "file_done", "path": path,
                      "index": i + 1, "count": count})
 
+        if job.errors:
+            job.status = "error"
+            shown = "; ".join(job.errors[:3])
+            if len(job.errors) > 3:
+                shown += f"; (+{len(job.errors) - 3} más)"
+            job.error = f"{len(job.errors)} archivo(s) no pudieron bajarse: {shown}"
+            publish({"type": "error", "error": job.error})
+            return
         job.status = "done"
         publish({"type": "done", "dest": str(dest_dir)})
 
     @staticmethod
-    def _fail(job: Job, path: str, e: Exception) -> None:
-        msg = f"{path}: {e}"
-        job.status = "error"
-        job.error = msg
-        job.events.put({"type": "error", "error": msg})
+    def _file_error(job: Job, path: str, e: Exception) -> None:
+        """Tolerancia por archivo: registrar el fallado y continuar.
+
+        El aviso viaja como evento `log` (la UI ya lo muestra en la
+        tarjeta); el resumen final sale por el evento `error`.
+        """
+        job.errors.append(f"{path}: {e}")
+        job.events.put({"type": "log", "msg": f"sin descargar {path}: {e}"})
 
 
 def _expand_patterns(repo_id: str, files: list[str],
