@@ -14,7 +14,9 @@ import os
 import socket
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
+from . import hfsearch
 from .api import router as api_router
 
 app = FastAPI(
@@ -23,6 +25,21 @@ app = FastAPI(
     description="Detecta tu hardware y te sugiere/descarga modelos GGUF de Hugging Face.",
 )
 app.include_router(api_router)
+
+
+# Traductores globales (U6-5 + pitfall 404-con-token): cualquier endpoint
+# (tabla, cola, paquetes) que deje subir un error de acceso de HF lo ve aqui
+# y responde el mensaje accionable, sin 500 crudo.
+@app.exception_handler(hfsearch.GatedError)
+async def _gated_handler(_, exc: hfsearch.GatedError) -> JSONResponse:
+    return JSONResponse({"detail": hfsearch.friendly_message(exc.repo_id, exc.status)},
+                        status_code=403)
+
+
+@app.exception_handler(hfsearch.RepoNotFound)
+async def _notfound_handler(_, exc: hfsearch.RepoNotFound) -> JSONResponse:
+    return JSONResponse({"detail": hfsearch.friendly_message(exc.repo_id, 404)},
+                        status_code=404)
 
 
 @app.get("/api/healthz")

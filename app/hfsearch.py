@@ -35,6 +35,39 @@ def has_token() -> bool:
     return bool(get_token())
 
 
+class RepoNotFound(Exception):
+    """404 de HF: inexistente, privado ajeno o gated sin acceso.
+
+    HF no los distingue a proposito (no quiere filtrar que un repo existe
+    pero es privado/gated): con token responde 404 en los tres casos y sin
+    token responde 401. Confirmado en vivo 2026-10-27; cualquier sonda
+    (model_info/resolve, anonima o con token) da lo mismo para los tres.
+    """
+
+    def __init__(self, repo_id: str) -> None:
+        super().__init__(f"repo no disponible (404): {repo_id}")
+        self.repo_id = repo_id
+
+
+def classify_http_error(repo_id: str, e: HfHubHTTPError) -> Exception | None:
+    """Mapea 401/403/404 de HF a GatedError/RepoNotFound; otro estatus: None.
+
+    Pitfall descubierto en vivo (2026-10-27): con token configurado, HF
+    responde **404** (no 401/403) a los repos gated cuyos terminos no fueron
+    aceptados con esa cuenta; el 401 anonimo solo aparece sin token. Sin esto,
+    todo gated con token subia como RepositoryNotFoundError -> 500.
+    El 404 NO es desambiguable (HF lo usa igual para inexistente/privado/
+    gated-sin-acceso, ver RepoNotFound): se traduce a RepoNotFound, cuyo
+    mensaje cubre los casos con pasos accionables.
+    """
+    status = _status_of(e)
+    if status in (401, 403):
+        return GatedError(repo_id, status)
+    if status == 404:
+        return RepoNotFound(repo_id)
+    return None
+
+
 def _token() -> str | None:
     return get_token()  # HF_TOKEN env o cache local; None si no hay
 
@@ -111,8 +144,9 @@ def repo_files(repo_id: str) -> dict:
         files = [FileEntry(i.path, getattr(i, "size", 0) or 0) for i in items
                  if hasattr(i, "size")]  # RepoFile siempre trae .size
     except HfHubHTTPError as e:
-        if _status_of(e) in (401, 403):
-            raise GatedError(repo_id, _status_of(e)) from e
+        mapped = classify_http_error(repo_id, e)
+        if mapped is not None:
+            raise mapped from e
         raise
     return {
         "repo_id": repo_id,
@@ -137,8 +171,17 @@ def friendly_message(repo_id: str, status: int | None) -> str:
     """
     head = (f"El repositorio {repo_id} es gated o privado y tu acceso no está "
             "habilitado")
-    if status == 404:  # por si algún llamador lo trata como gated
-        return f"No se encontró el repositorio {repo_id} (¿id incorrecto o borrado?)."
+    if status == 404:  # HF no distingue inexistente/privado/gated-sin-acceso
+        return (f"No se pudo abrir el repositorio {repo_id}. Hugging Face "
+                "responde 404 en tres casos: el id no existe (o fue "
+                "borrado/renombrado), es un repo privado que tu token no ve, "
+                "o es gated y sus términos no fueron aceptados con tu cuenta. "
+                "Pasos: 1) verifica el id exacto author/name (tal cual aparece "
+                "en la URL); 2) ábrelo manualmente en huggingface.co/" + repo_id +
+                " con tu cuenta: si pide aceptar términos, hazlo; 3) si no "
+                "tienes token, define HF_TOKEN o ejecuta `hf auth login` y "
+                "reinicia el backend (el token se lee solo al arrancar el "
+                "proceso).")
     if not has_token():
         return (head + ". Pasos: 1) abre huggingface.co/" + repo_id +
                 " y acepta los términos si el repo los tiene; 2) configura tu "

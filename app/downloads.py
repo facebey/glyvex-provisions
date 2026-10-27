@@ -65,8 +65,15 @@ class DownloadManager:
 
     def submit(self, repo_id: str, files: list[str],
                dest: Path = DEFAULT_DEST) -> Job:
+        try:
+            files = sorted(_expand_patterns(repo_id, files))
+        except HfHubHTTPError as e:
+            # gated/inexistente -> los mismos errores amigables que la tabla
+            # (los endpoints los traducen a 403/404 con mensaje accionable).
+            mapped = hfsearch.classify_http_error(repo_id, e)
+            raise (mapped if mapped is not None else e) from e
         job = Job(id=uuid.uuid4().hex[:8], repo_id=repo_id,
-                  files=sorted(_expand_patterns(repo_id, files)),
+                  files=files,
                   dest=str(dest))
         with self._lock:
             self._jobs[job.id] = job
@@ -165,14 +172,11 @@ class DownloadManager:
                 self._file_error(job, path, e)
                 continue
             except HfHubHTTPError as e:
-                # gated / 401 / 404 / 403... (el core deja propagar lo que
-                # no mapea a DownloadFailed). Para 401/403 usamos el mismo
-                # mensaje accionable que la tabla (U6-5), no el crudo de HF.
-                status = getattr(getattr(e, "response", None), "status_code",
-                                 None) or getattr(e, "status", None)
-                if status in (401, 403):
-                    e = hfsearch.GatedError(job.repo_id, status)
-                self._file_error(job, path, e)
+                # gated / inexistente / 404... (el core deja propagar lo que
+                # no mapea a DownloadFailed). Usamos la misma clasificacion
+                # amigable que la tabla (U6-5 + pitfall 404-con-token).
+                mapped = hfsearch.classify_http_error(job.repo_id, e)
+                self._file_error(job, path, mapped if mapped is not None else e)
                 continue
             except Exception as e:  # noqa: BLE001 — registro y sigo con el resto
                 self._file_error(job, path, e)
@@ -204,6 +208,8 @@ class DownloadManager:
         """
         if isinstance(e, hfsearch.GatedError):
             msg = hfsearch.friendly_message(e.repo_id, e.status)
+        elif isinstance(e, hfsearch.RepoNotFound):
+            msg = hfsearch.friendly_message(e.repo_id, 404)
         else:
             msg = str(e)
         job.errors.append(f"{path}: {msg}")
