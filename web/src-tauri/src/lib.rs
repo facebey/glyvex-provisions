@@ -72,26 +72,15 @@ fn parse_port_marker(line: &str) -> Option<u16> {
 }
 
 /// Resuelve qué binario lanzar según el modo.
-/// Orden: env `PROV_BACKEND_EXE` → resource empaquetado (producción) →
-/// `.venv` del repo (solo builds de dev).
+/// Orden: env `PROV_BACKEND_EXE` → `.venv` del repo (SOLO builds de dev, antes
+/// que la resource) → resource empaquetado (producción).
+/// Prioridad del `.venv` en dev: desde U7 la carpeta de resources existe también
+/// bajo `target/debug/resources/` (la declara `tauri.conf.json`), y si la
+/// resource se comprueba primero, `tauri dev` spawnearía el sidecar congelado
+/// del último build y los cambios en el código `.py` del backend no se reflejarían.
 fn backend_command(app: &AppHandle) -> Option<(String, Vec<String>, Option<PathBuf>)> {
     if let Ok(exe) = std::env::var("PROV_BACKEND_EXE") {
         return Some((exe, vec![], None));
-    }
-    if let Ok(dir) = app.path().resource_dir() {
-        // Tauri coloca los resources bajo resource_dir() manteniendo el nombre
-        // del entry; se aceptan ambas variantes (con y sin prefijo resources/),
-        // igual que la Suite.
-        for parts in [&["provisions-backend"][..], &["resources", "provisions-backend"][..]] {
-            let mut p = dir.clone();
-            for part in parts {
-                p = p.join(part);
-            }
-            let exe = p.join("provisions-backend.exe");
-            if exe.exists() {
-                return Some((exe.to_string_lossy().into_owned(), vec![], None));
-            }
-        }
     }
     #[cfg(debug_assertions)]
     {
@@ -109,6 +98,21 @@ fn backend_command(app: &AppHandle) -> Option<(String, Vec<String>, Option<PathB
                 vec!["-m".into(), "app.main".into()],
                 Some(dir.to_path_buf()),
             ));
+        }
+    }
+    if let Ok(dir) = app.path().resource_dir() {
+        // Tauri coloca los resources bajo resource_dir() manteniendo el nombre
+        // del entry; se aceptan ambas variantes (con y sin prefijo resources/),
+        // igual que la Suite.
+        for parts in [&["provisions-backend"][..], &["resources", "provisions-backend"][..]] {
+            let mut p = dir.clone();
+            for part in parts {
+                p = p.join(part);
+            }
+            let exe = p.join("provisions-backend.exe");
+            if exe.exists() {
+                return Some((exe.to_string_lossy().into_owned(), vec![], None));
+            }
         }
     }
     None
