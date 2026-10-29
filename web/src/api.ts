@@ -1,21 +1,43 @@
 // Cliente del backend de Glyvex Provisions (FastAPI en 127.0.0.1:8321, vía proxy Vite).
 // Solo se usa contra localhost; sin telemetría.
 
-export type Regime = 'gpu' | 'offload' | 'cpu'
+export type Regime = 'gpu' | 'multi' | 'offload' | 'cpu'
 export type FitStatus = 'ok' | 'tight' | 'no' | 'na'
 
 export interface Gpu {
   index: number
   name: string
+  vendor: 'nvidia' | 'amd' | 'intel' | 'other'
   vram_total_bytes: number
   vram_free_bytes: number
-  driver: string
+  driver: string | null
+  shared_memory?: boolean
+  vram_source?: 'nvidia-smi' | 'wmi' | 'catalog' | null
+}
+
+export interface Cpu {
+  name: string | null
+  vendor: string | null
+  cores: number
+  logical: number
+  base_mhz: number | null
+  socket: string | null
+}
+
+export interface RamModule {
+  size_bytes: number
+  speed_mhz: number | null
+  mem_type: string | null
+  manufacturer: string | null
+  part_number: string | null
 }
 
 export interface Hardware {
   gpus: Gpu[]
+  cpu: Cpu | null
   ram_total_bytes: number
   ram_available_bytes: number
+  ram_modules: RamModule[]
   cpu_cores: number
   disk_free_bytes: number
   disk_total_bytes: number
@@ -38,6 +60,10 @@ export interface FileRow {
   ratio: number | null
   status: FitStatus
   detail?: string
+  // U6-4: 2 = pesos+KV desde metadatos GGUF (kv_bytes = KV para el contexto
+  // elegido); 1 o ausente = tamaño x margen (v1).
+  fit_version?: number
+  kv_bytes?: number
 }
 
 export interface Group {
@@ -51,6 +77,143 @@ export interface RepoData {
   rows: FileRow[]
   groups: Group[]
   hardware: Hardware
+  profile?: { id: string; name: string }
+}
+
+// Perfiles de hardware (R10): "local" (auto) + manuales (GPU + RAM declaradas)
+export interface ProfileGpu {
+  name: string
+  vram_gb: number
+  vendor?: string | null
+}
+
+export interface ProfileCpu {
+  vendor?: string | null
+  model?: string | null
+  threads?: number | null
+}
+
+export interface Profile {
+  id: string
+  name: string
+  kind: 'auto' | 'manual'
+  gpus: ProfileGpu[]
+  ram_gb: number
+  note: string | null
+  // Adición 4d (opcionales: perfiles viejos no los traen)
+  cpu?: ProfileCpu | null
+  ram_type?: string | null
+  ram_speed_mhz?: number | null
+}
+
+export interface ProfileIn {
+  name: string
+  gpus: ProfileGpu[]
+  ram_gb: number
+  note?: string | null
+  cpu?: ProfileCpu | null
+  ram_type?: string | null
+  ram_speed_mhz?: number | null
+}
+
+// Ajustes persistentes (U6-3): umbrales del semáforo, margen y contexto.
+// `context` se guarda para la estimación v2 (KV por metadatos GGUF, U6-4).
+export interface Settings {
+  context: number
+  margin_pct: number
+  ok_frac: number
+  tight_frac: number
+}
+
+// Catálogo de hardware (adición 4d): modelos representativos por vendor +
+// VRAM mapeada por GPU + velocidades de RAM por tipo.
+export interface CatalogCpu {
+  model: string
+  cores: number
+  threads: number
+  base_ghz: number
+  boost_ghz: number
+}
+
+export interface CatalogGpu {
+  model: string
+  vram_gb: number
+}
+
+export interface Catalog {
+  cpus: Record<string, CatalogCpu[]>
+  gpus: Record<string, CatalogGpu[]>
+  ram: Record<string, number[]>
+}
+
+// Storage multi-path (R11) + librería local (R9)
+export interface Storage {
+  id: string
+  name: string
+  path: string
+  note: string | null
+}
+
+export interface StorageIn {
+  name: string
+  path: string
+  note?: string | null
+}
+
+export interface LibFile {
+  path: string
+  size: number
+  ext: string
+  label: string
+}
+
+export interface LibModel {
+  storage_id: string
+  storage_name: string
+  model_dir: string
+  name: string
+  files: LibFile[]
+  total_bytes: number
+  quants: string[]
+}
+
+export interface LibraryData {
+  models: LibModel[]
+  scanned_storages: number
+  scanned_dirs: number
+  files: number
+  errors: number
+  truncated: boolean
+}
+
+// Paquetes de modelos por escenario (R12): manifiestos .json en
+// <storage>\packajes\ (texto plano, portables entre servers).
+export interface PackageFile {
+  repo_id: string
+  file?: string | null     // archivo exacto (XOR con pattern)
+  pattern?: string | null  // glob, p. ej. "*Q4_K_M.gguf"
+}
+
+export interface Package {
+  id: string
+  name: string
+  scenario: string | null
+  profile: string | null
+  files: PackageFile[]
+  error: string | null  // manifiesto inválido (se muestra, no se descarga)
+}
+
+export interface PackageIn {
+  name: string
+  scenario?: string | null
+  profile?: string | null
+  files: PackageFile[]
+}
+
+export interface PackageJob {
+  id: string
+  repo_id: string
+  files: number
 }
 
 async function json<T>(r: Response): Promise<T> {
@@ -70,6 +233,9 @@ async function json<T>(r: Response): Promise<T> {
 export const getHardware = () =>
   fetch('/api/hardware').then((r) => json<Hardware>(r))
 
+export const getCatalog = () =>
+  fetch('/api/catalog').then((r) => json<Catalog>(r))
+
 export const searchModels = (query: string, limit = 20) =>
   fetch('/api/search', {
     method: 'POST',
@@ -77,9 +243,95 @@ export const searchModels = (query: string, limit = 20) =>
     body: JSON.stringify({ query, limit }),
   }).then((r) => json<{ models: ModelHit[] }>(r))
 
-export const getRepo = (repoId: string, regime: Regime) =>
-  fetch(`/api/repo/files?repo_id=${encodeURIComponent(repoId)}&regime=${regime}`)
-    .then((r) => json<RepoData>(r))
+export const getRepo = (repoId: string, regime: Regime, profileId?: string) =>
+  fetch(
+    `/api/repo/files?repo_id=${encodeURIComponent(repoId)}&regime=${regime}` +
+      (profileId ? `&profile=${encodeURIComponent(profileId)}` : ''),
+  ).then((r) => json<RepoData>(r))
+
+export const listProfiles = () =>
+  fetch('/api/profiles').then((r) => json<{ profiles: Profile[] }>(r))
+
+export const addProfile = (body: ProfileIn) =>
+  fetch('/api/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Profile>(r))
+
+export const updateProfile = (id: string, body: ProfileIn) =>
+  fetch(`/api/profiles/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Profile>(r))
+
+export const deleteProfile = (id: string) =>
+  fetch(`/api/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(
+    (r) => json<{ ok: boolean }>(r),
+  )
+
+export const getSettings = () =>
+  fetch('/api/settings').then((r) => json<Settings>(r))
+
+export const saveSettings = (body: Settings) =>
+  fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Settings>(r))
+
+export const listStorages = () =>
+  fetch('/api/storage').then((r) => json<{ storages: Storage[] }>(r))
+
+export const addStorage = (body: StorageIn) =>
+  fetch('/api/storage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Storage>(r))
+
+export const updateStorage = (id: string, body: StorageIn) =>
+  fetch(`/api/storage/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Storage>(r))
+
+export const deleteStorage = (id: string) =>
+  fetch(`/api/storage/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(
+    (r) => json<{ ok: boolean }>(r),
+  )
+
+export const getLibrary = (storageId?: string) =>
+  fetch(
+    '/api/library' +
+      (storageId ? `?storage_id=${encodeURIComponent(storageId)}` : ''),
+  ).then((r) => json<LibraryData>(r))
+
+export const listPackages = (storageId: string) =>
+  fetch(`/api/storage/${encodeURIComponent(storageId)}/packages`).then(
+    (r) => json<{ packages: Package[] }>(r),
+  )
+
+export const addPackage = (storageId: string, body: PackageIn) =>
+  fetch(`/api/storage/${encodeURIComponent(storageId)}/packages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Package>(r))
+
+export const deletePackage = (storageId: string, packageId: string) =>
+  fetch(
+    `/api/storage/${encodeURIComponent(storageId)}/packages/${encodeURIComponent(packageId)}`,
+    { method: 'DELETE' },
+  ).then((r) => json<{ ok: boolean }>(r))
+
+export const downloadPackage = (storageId: string, packageId: string) =>
+  fetch(
+    `/api/storage/${encodeURIComponent(storageId)}/packages/${encodeURIComponent(packageId)}/download`,
+    { method: 'POST' },
+  ).then((r) => json<{ jobs: PackageJob[]; dest: string }>(r))
 
 export const submitDownload = (repoId: string, files: string[], dest?: string) =>
   fetch('/api/downloads', {
@@ -93,11 +345,28 @@ export const listDownloads = () =>
     json<{ jobs: { id: string; repo_id: string; status: string; files: number; error: string | null }[] }>(r),
   )
 
+export const pauseDownload = (jobId: string) =>
+  fetch(`/api/downloads/${jobId}/pause`, { method: 'POST' }).then((r) =>
+    json<{ id: string; status: string }>(r),
+  )
+
+export const resumeDownload = (jobId: string) =>
+  fetch(`/api/downloads/${jobId}/resume`, { method: 'POST' }).then((r) =>
+    json<{ id: string; status: string }>(r),
+  )
+
+export const retryDownload = (jobId: string) =>
+  fetch(`/api/downloads/${jobId}/retry`, { method: 'POST' }).then((r) =>
+    json<{ id: string; status: string }>(r),
+  )
+
 export interface JobEvent {
-  type: 'start' | 'progress' | 'log' | 'done' | 'error'
+  type: 'start' | 'progress' | 'log' | 'file_done' | 'paused' | 'done' | 'error'
   path?: string
   done?: number
   total?: number
+  index?: number // file_done: archivos completados hasta este evento (1..count)
+  count?: number // file_done: total de archivos del job
   msg?: string
   error?: string
   dest?: string

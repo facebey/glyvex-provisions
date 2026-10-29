@@ -2,6 +2,8 @@
 .venv/
 __pycache__/
 *.pyc
+# runtime: perfiles manuales (R10) — profiles.json
+data/
 *.log
 *.egg-info/
 dist/
@@ -15,3 +17,6 @@ web/*.local
 # Entorno / secretos (el token HF vive en HF_TOKEN, nunca aqui)
 .env
 .env.*
+
+# Material de diseno (mockups/previews de estilo): no forma parte de la app
+Design/

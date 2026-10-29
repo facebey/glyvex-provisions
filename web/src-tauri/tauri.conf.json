@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Glyvex Provisions",
+  "version": "0.1.0",
+  "identifier": "com.glyvex.provisions",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:8331",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Glyvex Provisions",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 940,
+        "minHeight": 600,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": ["resources/provisions-backend"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Spanish", "English"],
+        "displayLanguageSelector": true,
+        "startMenuFolder": "Glyvex-Provisions",
+        "headerImage": "../../assets/brand/installer/nsis/nsis-header-oscuro.bmp",
+        "sidebarImage": "../../assets/brand/installer/nsis/nsis-sidebar-oscuro.bmp",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE1QUY3QjhBM0VFNzVFODYKUldTR1h1YytpbnV2RmMvNW5JU0EyM3hCSjJvS0plS2UvKzR2dER0eGJ4TWhrRitpUVVIa2wzZHIK",
+      "endpoints": [
+        "https://github.com/facebey/glyvex-provisions/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

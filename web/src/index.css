@@ -49,7 +49,14 @@ body {
 }
 
 .brand .logo {
-  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -4px;
+  margin-right: 2px;
+}
+
+.brand .logo svg {
+  display: block;
 }
 
 .brand .sub {
@@ -171,6 +178,117 @@ button.mini {
 .hw-meta {
   font-size: 0.8rem;
   color: var(--muted);
+}
+
+/* ---------- perfiles de hardware (R10) ---------- */
+.profile-active .hw-name {
+  color: var(--accent);
+}
+
+.profilebar select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 0.9rem;
+}
+
+.profilebar select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.addprofile input,
+.addprofile select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 10px;
+  font-size: 0.88rem;
+  min-width: 150px;
+}
+
+.addprofile input:focus,
+.addprofile select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.addprofile select:disabled {
+  opacity: 0.5;
+}
+
+/* Adición 4d: formulario de perfil en cascada (column layout) */
+.addprofile.cascade {
+  flex-direction: column;
+  align-items: stretch;
+  margin-top: 10px;
+}
+
+.addprofile.cascade .formrow {
+  flex-wrap: wrap;
+}
+
+.addprofile.cascade .formrow .muted {
+  width: 44px;
+  flex-shrink: 0;
+}
+
+.addprofile.cascade button.primary {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.prof-list {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.prof-row {
+  padding: 5px 0;
+}
+
+.prof-row b {
+  font-size: 0.9rem;
+}
+
+button.mini.danger {
+  margin-left: auto;
+  color: var(--no);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+button.mini.danger:hover:not(:disabled) {
+  border-color: var(--no);
+}
+
+/* ---------- storage y librería (R11 / R9) ---------- */
+.addprofile input.st-path {
+  flex: 1;
+  min-width: 220px;
+}
+
+.libbar {
+  margin-top: 14px;
+  align-items: center;
+}
+
+.libbar label.dest select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 0.88rem;
+  margin-left: 6px;
+}
+
+.libbar label.dest select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 /* ---------- búsqueda ---------- */
@@ -357,6 +475,11 @@ button.mini {
 .job-status.s-queued {
   color: var(--accent);
   border-color: rgba(47, 129, 247, 0.5);
+}
+
+.job-status.s-paused {
+  color: var(--tight);
+  border-color: rgba(210, 153, 34, 0.5);
 }
 
 .job-status.s-done {
