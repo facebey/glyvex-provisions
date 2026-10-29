@@ -42,7 +42,11 @@
         "installMode": "currentUser",
         "languages": ["Spanish", "English"],
         "displayLanguageSelector": true,
-        "startMenuFolder": "Glyvex-Provisions"
+        "startMenuFolder": "Glyvex-Provisions",
+        "headerImage": "../../assets/brand/installer/nsis/nsis-header-oscuro.bmp",
+        "sidebarImage": "../../assets/brand/installer/nsis/nsis-sidebar-oscuro.bmp",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
       }
     }
   },
