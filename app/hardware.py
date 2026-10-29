@@ -17,6 +17,7 @@ por vida por proceso; el primer `/api/hardware` cuesta ~2-3 s extras.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -29,8 +30,16 @@ from . import catalog
 DEFAULT_DOWNLOADS_DIR = r"D:\Downloads"
 GB = 1024 ** 3
 
-_SMI_QUERY = [
-    "nvidia-smi",
+# Hijos de consola (powershell / nvidia-smi) spawn-eados desde una app sin
+# consola propia (el backend instalado corre console=False): Windows les
+# asigna su propia consola VISIBLE — al arranque eso se ve como ~10 ventanas
+# de PowerShell parpadeando. Y si esa inicialización de consola/DLL falla, el
+# loader muestra el cuadro modal "Error de aplicación (0xc0000142)" (lo que
+# pasaba con nvidia-smi). Con CREATE_NO_WINDOW corren ocultos; si aun así
+# fallan, fallan en silencio y la app degrada igual de bien (WMI/psutil).
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+_SMI_ARGS = [
     "--query-gpu=index,name,memory.total,memory.free,driver_version",
     "--format=csv,noheader,nounits",
 ]
@@ -65,7 +74,8 @@ def _wmi(cim_class: str, props: str) -> list[dict]:
     data: list[dict] = []
     try:
         out = subprocess.run(cmd, capture_output=True, text=True,
-                             timeout=30, check=True).stdout.strip()
+                             timeout=30, check=True,
+                             creationflags=_NO_WINDOW).stdout.strip()
         if out:
             parsed = json.loads(out)
             data = parsed if isinstance(parsed, list) else [parsed]
@@ -82,11 +92,17 @@ def _nvidia_gpus() -> list[dict]:
     with _smi_lock:
         if _smi_cache and time.monotonic() - _smi_cache[0] < _NVIDIA_TTL:
             return _smi_cache[1]
-    try:
-        out = subprocess.run(_SMI_QUERY, capture_output=True, text=True,
-                             timeout=10, check=True).stdout
-    except (OSError, subprocess.SubprocessError):
-        out = ""
+    # Ruta absoluta (System32): evita depender del resolver del sidecar
+    # (cwd = _MEIPASS) y cualquier PATH raro del entorno empaquetado.
+    smi = shutil.which("nvidia-smi")
+    out = ""
+    if smi:
+        try:
+            out = subprocess.run([smi, *_SMI_ARGS], capture_output=True, text=True,
+                                 timeout=10, check=True,
+                                 creationflags=_NO_WINDOW).stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
     gpus: list[dict] = []
     for line in out.strip().splitlines():
         parts = [p.strip() for p in line.split(",")]
