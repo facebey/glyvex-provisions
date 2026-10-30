@@ -23,6 +23,7 @@ use serde::Serialize;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
@@ -36,6 +37,11 @@ const BASE_PORT: u16 = 8321;
 
 /// Hijo spawn-eado por NOSOTROS (reused no se guarda: no lo matamos).
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
+
+/// U13: parada intencional por auto-update. El ciclo de vida NO debe
+/// re-spawn-e al sidecar: el instalador NSIS necesita el lock de sus archivos
+/// para reemplazarlos (patrón stop_sidecar de la Suite).
+static STOP_FOR_UPDATE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Serialize)]
 struct SidecarState {
@@ -228,6 +234,9 @@ fn monitor_reused(app: &AppHandle, port: u16) {
 fn run_lifecycle(app: AppHandle) {
     let mut attempts = 0;
     loop {
+        if STOP_FOR_UPDATE.load(Ordering::SeqCst) {
+            return; // U13: stop_sidecar lo pidió (auto-update): no re-spawn
+        }
         if let Some(port) = find_existing_backend() {
             monitor_reused(&app, port);
             // el backend ajeno desapareció → se intenta levantar propio
@@ -258,12 +267,23 @@ fn kill_child() {
     }
 }
 
+/// U13: detiene el sidecar ANTES del auto-update (espejo de la Suite T6.1):
+/// con provisions-backend.exe vivo los .dll/.pyd de _internal/ quedan con lock
+/// y el NSIS falla en "Error abriendo archivo para escritura". STOP_FOR_UPDATE
+/// impide que run_lifecycle lo re-levante justo después de matarlo.
+#[tauri::command]
+fn stop_sidecar() {
+    STOP_FOR_UPDATE.store(true, Ordering::SeqCst);
+    kill_child();
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         // process:allow-restart (capabilities) lo usa el updater tras instalar;
         // sin el plugin registrado el build rechaza esa permission.
         .plugin(tauri_plugin_process::init())
+        .invoke_handler(tauri::generate_handler![stop_sidecar])
         .setup(|app| {
             let handle = app.handle().clone();
             thread::spawn(move || run_lifecycle(handle));

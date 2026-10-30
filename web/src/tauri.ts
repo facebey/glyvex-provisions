@@ -20,6 +20,51 @@
  * (app 100% offline, licencia SIL OFL 1.1 incluida).
  */
 
+// ---------------------------------------------------------------------------
+// U13: auto-update — espejo de `tauri.js` de la Suite (T6.1). Inactivo fuera
+// de la shell Tauri: en el navegador de dev isTauri() es false. Imports
+// dinámicos: el IPC de los plugins no se carga en el navegador.
+// ---------------------------------------------------------------------------
+
+export function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+// Detiene el sidecar ANTES del auto-update (igual que la Suite): con
+// provisions-backend.exe vivo, _internal/ queda con lock y el instalador NSIS
+// falla. En Rust, STOP_FOR_UPDATE evita que el ciclo lo re-spawn-e.
+export async function stopSidecar(): Promise<void> {
+  if (!isTauri()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('stop_sidecar')
+}
+
+// check() resuelve con el objeto Update (tiene .downloadAndInstall) o null si
+// ya está en la última versión. Tipo mínimo propio para no acoplar App.tsx a
+// los tipos del plugin.
+export interface UpdateInfo {
+  version: string
+  body?: string | null
+  date?: string | null
+  downloadAndInstall?: (
+    cb?: (ev: { event?: string; data?: { contentLength?: number; chunkLength?: number } }) => void,
+  ) => Promise<boolean>
+}
+
+export async function checkForUpdate(): Promise<UpdateInfo | null> {
+  if (!isTauri()) return null
+  const { check } = await import('@tauri-apps/plugin-updater')
+  return (await check()) as UpdateInfo | null
+}
+
+// Tras instalar, reinicia la app (en Windows el instalador reemplaza y la
+// app se cierra sola).
+export async function relaunchApp(): Promise<void> {
+  if (!isTauri()) return
+  const { relaunch } = await import('@tauri-apps/plugin-process')
+  await relaunch()
+}
+
 function splashStyleTag(): string {
   return `
     @font-face { font-family: Poppins; font-weight: 400; src: url(/fonts/poppins-regular.woff2) format("woff2"); }
