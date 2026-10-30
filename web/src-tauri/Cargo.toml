@@ -1,6 +1,6 @@
 [package]
 name = "glyvex-provisions"
-version = "0.1.0"
+version = "0.1.1"
 description = "Glyvex Provisions — shell Tauri (sidecar FastAPI)"
 edition = "2021"
 
