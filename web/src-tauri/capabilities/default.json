@@ -17,5 +17,5 @@
       "http://127.0.0.1:8330"
     ]
   },
-  "permissions": ["core:default", "updater:default", "process:allow-restart"]
+  "permissions": ["core:default", "updater:default", "process:allow-restart", "sidecar-control"]
 }
