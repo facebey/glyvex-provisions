@@ -775,19 +775,19 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <span className="logo">
-            {/* Logo Glyvex AI (brand kit oficial) — diamante teal + punto naranja (idéntico a ai-suite.glyvexgroup.com) */}
-            <svg viewBox="0 0 80 80" width="24" height="24" role="img" aria-label="Glyvex AI">
+            {/* Isotopo Glyvex Provisions (2026-11-02): "descarga en bandeja" — mismo glyph que
+                assets/brand/app-icon.svg, recortado al trazo (sin tile) para el lockup del header. */}
+            <svg viewBox="176 180 672 672" width="24" height="24" role="img" aria-label="Glyvex Provisions">
               <defs>
-                <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <linearGradient id="logoGrad" x1="208" y1="190" x2="816" y2="842" gradientUnits="userSpaceOnUse">
                   <stop offset="0%" stopColor="#0d9488" />
                   <stop offset="50%" stopColor="#06b6d4" />
-                  <stop offset="100%" stopColor="#0ea5e9" />
+                  <stop offset="100%" stopColor="#8b5cf6" />
                 </linearGradient>
               </defs>
-              <polygon points="40,12 66,38 40,72 14,38" fill="url(#logoGrad)" />
-              <polygon points="40,12 66,38 40,40" fill="#0d9488" opacity="0.35" />
-              <polygon points="40,40 66,38 40,72" fill="#0ea5e9" opacity="0.25" />
-              <circle cx="40" cy="38" r="4.5" fill="#f97316" />
+              <path d="M250 560 V735 Q250 800 315 800 H709 Q774 800 774 735 V560" fill="none" stroke="url(#logoGrad)" strokeWidth="84" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M472 190 H552 V420 H640 L512 585 L384 420 H472 Z" fill="url(#logoGrad)" />
+              <circle cx="512" cy="452" r="44" fill="#f97316" />
             </svg>
           </span> Glyvex Provisions
           <span className="sub">tu hardware → modelos que caben</span>

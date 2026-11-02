@@ -21,5 +21,6 @@ web/*.local
 # Material de diseno (mockups/previews de estilo): no forma parte de la app
 Design/
 
-# Instaladores NSIS generados por build.ps1 (copiados aqui para uso local; binarios grandes, fuera del repo)
-Installer/
+# Instaladores NSIS generados por build.ps1 (copiados a /Installer para uso local; binarios grandes, fuera del repo)
+# Ojo: anclado a la raiz para no tragarse tambien assets/brand/installer/ (assets versionados)
+/Installer/
