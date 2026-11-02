@@ -1,10 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80">
-  <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-    <stop offset="0%" stop-color="#0d9488"/><stop offset="50%" stop-color="#06b6d4"/><stop offset="100%" stop-color="#0ea5e9"/>
-  </linearGradient></defs>
-  <rect width="80" height="80" rx="16" fill="#000000"/>
-  <polygon points="40,12 66,38 40,72 14,38" fill="url(#g)"/>
-  <polygon points="40,12 66,38 40,40" fill="#0d9488" opacity="0.35"/>
-  <polygon points="40,40 66,38 40,72" fill="#0ea5e9" opacity="0.25"/>
-  <circle cx="40" cy="38" r="4.5" fill="#f97316"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Mismo isotopo que assets/brand/app-icon.svg ("descarga en bandeja"). -->
+  <defs>
+    <linearGradient id="g" x1="180" y1="180" x2="844" y2="844" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d9488"/>
+      <stop offset="0.5" stop-color="#06b6d4"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="180" fill="#0a0a0a"/>
+  <path d="M250 560 V735 Q250 800 315 800 H709 Q774 800 774 735 V560"
+        fill="none" stroke="url(#g)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M472 190 H552 V420 H640 L512 585 L384 420 H472 Z" fill="url(#g)"/>
+  <circle cx="512" cy="452" r="26" fill="#f97316"/>
 </svg>
