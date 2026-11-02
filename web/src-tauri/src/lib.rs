@@ -6,8 +6,9 @@
 //! 2. Si no, lo spawn-ea: en dev con el python del `.venv` (`-m app.main`,
 //!    cwd = raíz del repo); en producción con el sidecar PyInstaller empaquetado
 //!    como resource (`provisions-backend/provisions-backend.exe`).
-//! 3. Drena su stdout en un hilo (no bloquear a uvicorn escribiendo logs) y
-//!    captura el marcador `#PORT_ASSIGNED:<puerto>#`.
+//! 3. Drena stdout Y stderr en hilos (no bloquear al sidecar escribiendo; el
+//!    stderr se anexa a DATA_DIR/logs/sidecar-stderr.log) y captura el
+//!    marcador `#PORT_ASSIGNED:<puerto>#`.
 //! 4. Poll de `/api/healthz` (ureq, sin reqwest/tokio) hasta 120 s, con hasta
 //!    3 intentos de spawn.
 //! 5. Emite `sidecar-state {state, url, port}` con heartbeat cada 5 s (la
@@ -131,7 +132,7 @@ fn spawn_and_wait(app: &AppHandle) -> Option<u16> {
     let mut cmd = Command::new(&program);
     cmd.args(&args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .stdin(Stdio::null());
     if let Some(c) = &cwd {
         cmd.current_dir(c);
@@ -149,6 +150,47 @@ fn spawn_and_wait(app: &AppHandle) -> Option<u16> {
     }
     let mut child = cmd.spawn().ok()?;
     let stdout = child.stdout.take()?;
+
+    // Drenador de stderr: con PROV_STDOUT_PIPE=1 el console_hook deja AMBAS
+    // corrientes en la pipe, y antes stderr era null: cualquier traceback o
+    // error de arranque del sidecar se perdía. Se drena SIEMPRE (un pipe lleno
+    // bloquearía al sidecar escribiendo) y cada línea se anexa a
+    // DATA_DIR/logs/sidecar-stderr.log (mismo contrato de ruta que el log de
+    // fallback del propio sidecar en packaging/console_hook.py). Sin
+    // LOCALAPPDATA accesible: solo se drena y descarta.
+    if let Some(err) = child.stderr.take() {
+        let log_path = std::env::var("LOCALAPPDATA").ok().map(|d| {
+            PathBuf::from(d)
+                .join("glyvex-provisions")
+                .join("data")
+                .join("logs")
+                .join("sidecar-stderr.log")
+        });
+        thread::spawn(move || {
+            use std::io::Write;
+            let mut file = log_path.and_then(|p| {
+                std::fs::create_dir_all(p.parent()?).ok()?;
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&p)
+                    .ok()
+            });
+            let mut reader = BufReader::new(err);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break, // pipe cerrado
+                    Ok(_) => {
+                        if let Some(f) = &mut file {
+                            let _ = writeln!(f, "{}", line.trim_end());
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     // Hilo drenador: lee stdout SIEMPRE (si el pipe se llena, uvicorn se
     // bloquea escribiendo sus logs) y reenvía el puerto del marker.
