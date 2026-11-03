@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   type Catalog,
+  type EnginesData,
   type FileRow,
   type Hardware,
   type JobEvent,
@@ -14,6 +15,10 @@ import {
   type RepoData,
   type Settings,
   type Storage,
+  type SessionEvent,
+  type SessionInfo,
+  type SessionState,
+  type SuiteStatus,
   addPackage,
   addProfile,
   addStorage,
@@ -23,20 +28,28 @@ import {
   downloadPackage,
   fmtBytes,
   getCatalog,
+  getEngines,
   getHardware,
   getLibrary,
   getRepo,
+  getSession,
   getSettings,
+  getSuiteStatus,
+  launchModel,
   listDownloads,
   listPackages,
   listProfiles,
   listStorages,
   openJobEvents,
+  openSessionEvents,
   pauseDownload,
+  registerSuiteFolder,
   resumeDownload,
   retryDownload,
+  saveEngines,
   saveSettings,
   searchModels,
+  stopSession,
   submitDownload,
 } from './api'
 import {
@@ -73,6 +86,15 @@ const REGIME_LABELS: Record<Regime, string> = {
   multi: 'Multi-GPU (suma VRAM)',
   offload: 'Offload GPU+RAM',
   cpu: 'Solo CPU (RAM)',
+}
+
+// U15: estados de la sesión del lanzador (espejo del backend)
+const SESSION_STATE_LABELS: Record<SessionState, string> = {
+  starting: 'Cargando el modelo…',
+  verifying: 'Verificando (primer token)…',
+  ready: 'Corriendo',
+  failed: 'Falló',
+  stopped: 'Detenido',
 }
 
 // Formato de porcentaje para el formulario de Ajustes (U6-3): quita el
@@ -181,6 +203,18 @@ export default function App() {
   const [pkgRows, setPkgRows] = useState<{ repo: string; spec: string }[]>([
     { repo: '', spec: '' },
   ])
+  // U15: lanzador de modelos (ecosistema Glyvex: Suite + servers R10)
+  const [engines, setEngines] = useState<EnginesData | null>(null)
+  const [userBin, setUserBin] = useState('')
+  const [suiteSt, setSuiteSt] = useState<SuiteStatus | null>(null)
+  const [launchModelDir, setLaunchModelDir] = useState('') // de la librería
+  const [launchFile, setLaunchFile] = useState('') // .gguf dentro del modelo
+  const [launchPath, setLaunchPath] = useState('') // ruta manual (prende si llena)
+  const [launchEngine, setLaunchEngine] = useState('auto')
+  const [session, setSession] = useState<SessionInfo | null>(null)
+  const [sessionLog, setSessionLog] = useState<string[]>([])
+  const [suiteMsg, setSuiteMsg] = useState('')
+  const sessionEsRef = useRef<EventSource | null>(null)
   // Ajustes persistentes (U6-3): umbrales del semáforo, margen, contexto.
   // En la UI los umbrales y el margen se manejan como porcentajes.
   const [adjOk, setAdjOk] = useState('80')
@@ -370,6 +404,162 @@ export default function App() {
       setBusy(null)
     }
   }
+
+  // -------------------------------------------------------------------------
+  // U15: lanzador de modelos (verificación + registro en la Suite)
+  // -------------------------------------------------------------------------
+  const closeSessionEvents = useCallback(() => {
+    sessionEsRef.current?.close()
+    sessionEsRef.current = null
+  }, [])
+
+  const attachSessionEvents = useCallback(() => {
+    closeSessionEvents()
+    const es = openSessionEvents((ev: SessionEvent) => {
+      if (ev.type === 'log' && ev.line) {
+        setSessionLog((l) => [...l.slice(-499), ev.line as string])
+      } else if (ev.type === 'state') {
+        setSession((s) =>
+          s
+            ? {
+                ...s,
+                state: ev.state ?? s.state,
+                error: ev.error ?? s.error,
+                metrics: ev.metrics ?? s.metrics,
+              }
+            : s,
+        )
+        if (ev.state === 'failed' || ev.state === 'stopped') {
+          closeSessionEvents()
+          // snapshot final: métricas + tail completo (autoridad sobre el log)
+          getSession()
+            .then((s) => {
+              setSession(s)
+              setSessionLog(s.log_tail)
+            })
+            .catch(() => {})
+        }
+      }
+    })
+    sessionEsRef.current = es
+  }, [closeSessionEvents])
+
+  // Carga inicial del lanzador: engines + Suite + sesión activa (re-attach).
+  useEffect(() => {
+    getEngines()
+      .then((d) => {
+        setEngines(d)
+        setUserBin(d.user_binary ?? '')
+      })
+      .catch(() => {})
+    getSuiteStatus().then(setSuiteSt).catch(() => {})
+    getSession()
+      .then((s) => {
+        setSession(s)
+        setSessionLog(s.log_tail)
+        if (s.state !== 'failed' && s.state !== 'stopped') attachSessionEvents()
+      })
+      .catch(() => {
+        setSession(null) // 404: no hay sesión
+      })
+    return closeSessionEvents
+  }, [attachSessionEvents, closeSessionEvents])
+
+  const doSaveUserBinary = async () => {
+    setBusy('engines')
+    setError(null)
+    try {
+      await saveEngines(userBin.trim() || null)
+      const d = await getEngines()
+      setEngines(d)
+      setUserBin(d.user_binary ?? '')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doLaunch = async () => {
+    const path = launchPath.trim() || launchFile
+    if (!path) {
+      setError('Elegí un modelo de la librería (o poné una ruta manual).')
+      return
+    }
+    setBusy('launch')
+    setError(null)
+    setSuiteMsg('')
+    closeSessionEvents()
+    setSessionLog([])
+    setSession(null)
+    try {
+      await launchModel({
+        model_path: path,
+        engine: launchEngine,
+        profile_id: profileId,
+        regime,
+        context: parseInt(adjContext, 10) || 4096,
+      })
+      attachSessionEvents()
+      getSession().then(setSession).catch(() => {})
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doStop = async () => {
+    setBusy('stop')
+    setError(null)
+    try {
+      await stopSession()
+      closeSessionEvents()
+      getSession()
+        .then((s) => {
+          setSession(s)
+          setSessionLog(s.log_tail)
+        })
+        .catch(() => {})
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doRegisterSuite = async () => {
+    const dir = selectedModel?.model_dir
+    if (!dir || !suiteSt) return
+    const ok = window.confirm(
+      `Registrar esta carpeta en Glyvex-AI-Suite?\n\n${dir}\n\n` +
+        'Se agrega a sus directorios de modelos (permanente) y el modelo ' +
+        'aparecerá en el Launcher de la Suite. Provisions no escribe sus ' +
+        'archivos: usa su API pública.',
+    )
+    if (!ok) return
+    setBusy('register')
+    setSuiteMsg('')
+    setError(null)
+    try {
+      const r = await registerSuiteFolder(dir)
+      setSuiteMsg(
+        `Registrado: ${r.new_models} modelo(s) nuevo(s) en la Suite ` +
+          `(${r.model_dirs.length} carpeta(s) en total).`,
+      )
+      getSuiteStatus().then(setSuiteSt).catch(() => {})
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const sessionActive =
+    !!session &&
+    (session.state === 'starting' ||
+      session.state === 'verifying' ||
+      session.state === 'ready')
 
   // Adición 4d: cascada vendor → modelo (VRAM/hilos autofillados del catálogo)
   const onCpuVendor = (v: string) => {
@@ -628,6 +818,18 @@ export default function App() {
       ? lib.models.filter((m) => m.storage_id === libFilter)
       : lib.models
     : []
+
+  // U15: modelo elegido en el lanzador. Usa TODA la librería (no el filtro
+  // de storage de la tabla) y solo archivos GGUF lanzables (sin mmproj/MTP).
+  const selectedModel = (lib?.models ?? []).find(
+    (m) => m.model_dir === launchModelDir,
+  ) ?? null
+  const launchFiles = (selectedModel?.files ?? []).filter(
+    (f) =>
+      f.ext === '.gguf' &&
+      !f.label.startsWith('mmproj') &&
+      !f.label.startsWith('MTP'),
+  )
 
   const toggle = (path: string) => {
     setSelected((s) => {
@@ -1492,6 +1694,239 @@ export default function App() {
               </div>
             )}
           </>
+        )}
+      </section>
+
+      {/* Lanzador de modelos (U15 — ecosistema Glyvex) */}
+      <section className="panel launcher">
+        <h2>Lanzador de modelos</h2>
+        <div className="muted small">
+          Verificación de modelos locales: carga, primer token, tok/s y VRAM
+          real (comando mínimo a propósito: si falla, la causa es «no cabe»,
+          no un flag). Con Glyvex-AI-Suite abierta podés registrar la carpeta
+          del modelo; sin ella, el server queda corriendo en su puerto
+          (servers R10). Opciones avanzadas y presets: en la Suite y en U16.
+        </div>
+
+        {/* Engines (cascada) */}
+        <div className="muted small" style={{ marginTop: 8 }}>
+          Engine (cascada auto: Suite → binario propio → Ollama)
+        </div>
+        <div className="engines-list">
+          {engines?.engines.engines.map((e) => (
+            <span
+              key={e.id}
+              className={`eng ${e.ok ? 'on' : 'off'}`}
+              title={e.detail ?? e.path ?? e.version ?? e.id}
+            >
+              <span className="dot" />
+              {e.label}
+              {e.version ? ` · ${e.version}` : ''}
+            </span>
+          ))}
+          {engines && engines.engines.available.length === 0 && (
+            <span className="eng off" style={{ borderStyle: 'dashed' }}>
+              sin engines disponibles
+            </span>
+          )}
+        </div>
+        <div className="row addprofile">
+          <label className="dest" style={{ flex: 1 }}>
+            Binario llama-server propio (opcional):
+            <input
+              name="userbin"
+              className="st-path"
+              value={userBin}
+              onChange={(e) => setUserBin(e.target.value)}
+              placeholder="C:\llama.cpp\build\bin\llama-server.exe"
+            />
+          </label>
+          <button onClick={doSaveUserBinary} disabled={busy === 'engines'}>
+            {busy === 'engines' ? 'Guardando…' : 'Guardar engine'}
+          </button>
+        </div>
+
+        {/* Modelo + parámetros + acción */}
+        <div className="row addprofile">
+          <label className="dest">
+            Modelo:
+            <select
+              name="launchmodel"
+              value={launchModelDir}
+              onChange={(e) => {
+                setLaunchModelDir(e.target.value)
+                setLaunchFile('')
+                setLaunchPath('')
+              }}
+            >
+              <option value="">—</option>
+              {(lib?.models ?? []).map((m) => (
+                <option key={m.model_dir} value={m.model_dir}>
+                  {m.name} ({m.storage_name})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="dest">
+            Archivo:
+            <select
+              name="launchfile"
+              value={launchFile}
+              onChange={(e) => {
+                setLaunchFile(e.target.value)
+                setLaunchPath('')
+              }}
+              disabled={!selectedModel}
+            >
+              <option value="">—</option>
+              {launchFiles.map((f) => (
+                <option key={f.path} value={f.path}>
+                  {f.label} · {fmtBytes(f.size)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="dest">
+            Engine:
+            <select
+              name="launchengine"
+              value={launchEngine}
+              onChange={(e) => setLaunchEngine(e.target.value)}
+            >
+              <option value="auto">auto (cascada)</option>
+              {engines?.engines.available.map((id) => (
+                <option key={id} value={id}>{id}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="row addprofile">
+          <label className="dest" style={{ flex: 1 }}>
+            …o ruta manual (prevalece sobre la librería):
+            <input
+              name="launchpath"
+              className="st-path"
+              value={launchPath}
+              onChange={(e) => setLaunchPath(e.target.value)}
+              placeholder="D:\modelos\mi-modelo.gguf"
+            />
+          </label>
+          <span className="muted small">
+            {REGIME_LABELS[regime]} · {activeProfile?.name ?? 'Esta máquina (auto)'} ·
+            ctx {adjContext}
+          </span>
+          <button
+            className="primary"
+            onClick={doLaunch}
+            disabled={busy === 'launch' || sessionActive}
+          >
+            {busy === 'launch' ? 'Lanzando…' : 'Lanzar y verificar'}
+          </button>
+          <button onClick={doStop} disabled={busy === 'stop' || !sessionActive}>
+            {busy === 'stop' ? 'Deteniendo…' : 'Detener'}
+          </button>
+        </div>
+
+        {/* Sesión activa */}
+        {session && (
+          <div className="session">
+            <div className={`state ${session.state}`}>
+              <span className="dot" />
+              {SESSION_STATE_LABELS[session.state]}
+            </div>
+            <div className="meta">
+              <span>{session.id}</span>
+              <span>{session.engine_label || session.engine}</span>
+              <span>puerto {session.port}</span>
+              <span>ctx {session.n_ctx}</span>
+              <span>-ngl {session.ngl}</span>
+              {session.uptime_s > 0 && <span>{session.uptime_s} s</span>}
+            </div>
+            {session.ngl_detail && (
+              <div className="muted small">{session.ngl_detail}</div>
+            )}
+            {session.metrics && session.state === 'ready' && (
+              <div className="metrics">
+                {session.metrics.ttfb_ms != null && (
+                  <span className="metric">
+                    <span className="k">Primer token</span>{' '}
+                    <span className="v">{session.metrics.ttfb_ms} ms</span>
+                  </span>
+                )}
+                {session.metrics.tok_s != null && (
+                  <span className="metric">
+                    <span className="k">Velocidad</span>{' '}
+                    <span className="v">{session.metrics.tok_s} tok/s</span>
+                  </span>
+                )}
+                {session.metrics.vram.map((v) => (
+                  <span className="metric" key={v.name}>
+                    <span className="k">{v.name}</span>{' '}
+                    <span className="v">
+                      {v.free_gb}/{v.total_gb} GB libres
+                    </span>
+                  </span>
+                ))}
+              </div>
+            )}
+            {session.error && (
+              <div style={{ color: 'var(--no)', fontSize: '0.85rem', marginTop: 6, wordBreak: 'break-all' }}>
+                {session.error}
+              </div>
+            )}
+            {session.state === 'ready' && (
+              <div className="muted small">
+                El server queda corriendo en 127.0.0.1:{session.port} (sobrevive
+                al cierre de la GUI; se detiene con «Detener» o al cerrar la app).
+              </div>
+            )}
+            {sessionLog.length > 0 && (
+              <pre className="logbox">{sessionLog.slice(-80).join('\n')}</pre>
+            )}
+          </div>
+        )}
+
+        {/* Suite (ecosistema) */}
+        <div className="row addprofile" style={{ marginTop: 12 }}>
+          <span className="muted">
+            Glyvex-AI-Suite:{' '}
+            {suiteSt
+              ? suiteSt.running
+                ? `abierta (v${suiteSt.version ?? '?'}) en 127.0.0.1:${suiteSt.port}${
+                    suiteSt.managed_runtime
+                      ? ` · runtime gestionado ${suiteSt.managed_runtime.pin}`
+                      : ' · sin runtime gestionado'
+                  }`
+                : 'no abierta'
+              : '…'}
+          </span>
+          {suiteSt?.running ? (
+            <button
+              onClick={doRegisterSuite}
+              disabled={busy === 'register' || !selectedModel}
+              title={selectedModel
+                ? `Registrar ${selectedModel.model_dir}`
+                : 'Primero elegí un modelo de la librería'}
+            >
+              {busy === 'register' ? 'Registrando…' : 'Registrar en la Suite'}
+            </button>
+          ) : (
+            <button disabled title="Abrí Glyvex-AI-Suite para habilitar el registro">
+              Registrar en la Suite
+            </button>
+          )}
+          <button
+            onClick={() =>
+              window.open(`http://127.0.0.1:${suiteSt?.port ?? 7981}`, '_blank')
+            }
+          >
+            Abrir Suite
+          </button>
+        </div>
+        {suiteMsg && (
+          <div className="muted small" style={{ color: 'var(--ok)' }}>
+            {suiteMsg}
+          </div>
         )}
       </section>
 

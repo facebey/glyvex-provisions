@@ -3,3 +3,6 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 psutil>=5.9
+# Cliente HTTP local (U15): llama-server/Ollama y la API de Glyvex-AI-Suite.
+# Ya estaba en el venv como dep de huggingface_hub; queda explícito.
+httpx2>=2.0

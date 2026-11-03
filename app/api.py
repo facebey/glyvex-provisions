@@ -19,6 +19,8 @@ from hf_down import (MMPROJ_RE, MTP_RE, QUANT_RE, SUPPORT_EXTS,
 from . import catalog
 from . import downloads as dl
 from . import fit, gguf, hfsearch
+from . import launcher
+from . import suite
 from . import packages
 from . import profiles
 from . import settings as st
@@ -387,3 +389,124 @@ def resume_download(job_id: str) -> dict:
 def retry_download(job_id: str) -> dict:
     """Alias de resume: relanza un job en paused/error (idempotente)."""
     return resume_download(job_id)
+
+
+# ---------------------------------------------------------------------------
+# U15: engines, Suite (ecosistema) y lanzador de modelos
+# ---------------------------------------------------------------------------
+
+
+class EnginesBody(BaseModel):
+    user_binary: str | None = None
+
+
+class LaunchReq(BaseModel):
+    model_path: str
+    engine: str = "auto"          # auto | suite | user | ollama
+    profile_id: str = profiles.AUTO_ID
+    regime: str = "gpu"           # fit.REGIMES
+    context: int = st.DEFAULTS["context"]
+    port: int | None = None
+
+
+@router.get("/engines")
+def list_engines() -> dict:
+    return {"engines": launcher.detect_engines(), **launcher.get_engines()}
+
+
+@router.put("/engines")
+def put_engines(body: EnginesBody) -> dict:
+    path = (body.user_binary or "").strip()
+    if path:
+        p = Path(path)
+        if not p.is_file():
+            raise HTTPException(422, f"binario inexistente: {p}")
+    return launcher.save_engines(path or None)
+
+
+@router.get("/suite")
+def suite_status() -> dict:
+    return suite.status()
+
+
+@router.post("/suite/register")
+def suite_register(body: dict) -> dict:
+    """Registra una carpeta en la Suite (POST /api/config + scan).
+    409 si la Suite no está abierta — el registro es intencional y la UI
+    debe decir 'abrila y reintenta'."""
+    folder = (body or {}).get("folder")
+    if not folder:
+        raise HTTPException(422, "faltó 'folder'")
+    try:
+        return suite.register_folder(folder)
+    except suite.SuiteNotRunning as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:  # noqa: BLE001 — error HTTP de la Suite
+        raise HTTPException(502, f"la Suite devolvió un error: {e}"[:300])
+
+
+@router.post("/engines/launch", status_code=201)
+def launch_session(body: LaunchReq) -> dict:
+    if body.regime not in fit.REGIMES:
+        raise HTTPException(422, f"régimen inválido: {body.regime}")
+    if body.context not in st.CONTEXTS:
+        raise HTTPException(422, f"contexto inválido: {body.context}")
+    try:
+        s = launcher.manager.launch(
+            body.model_path, body.engine, body.profile_id,
+            body.regime, body.context, body.port)
+    except launcher.BusyError as e:
+        raise HTTPException(409, str(e))
+    except launcher.PortBusyError as e:
+        raise HTTPException(409, str(e))
+    except launcher.EngineUnavailable as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return {"id": s.id, "port": s.port, "engine": s.engine,
+            "ngl": s.ngl, "state": s.state}
+
+
+@router.get("/engines/session")
+def get_session(tail: int = 60) -> dict:
+    snap = launcher.manager.snapshot(tail=tail)
+    if snap is None:
+        raise HTTPException(404, "no hay sesión activa")
+    return snap
+
+
+@router.get("/engines/session/events")
+def session_events() -> StreamingResponse:
+    """SSE de la sesión activa: launched/log/state/verified/stopped."""
+    s = launcher.manager.current
+    if s is None:
+        raise HTTPException(404, "no hay sesión activa")
+
+    def gen():
+        while True:
+            try:
+                ev = s.events.get(timeout=15)
+            except queue.Empty:
+                yield ": keepalive\n\n"
+                continue
+            yield f"data: {json.dumps(ev)}\n\n"
+            # failed/stopped cierran el stream: la UI lee el estado final y
+            # puede re-suscribirse si lanza de nuevo.
+            if ev.get("type") == "state" and ev.get("state") in ("failed", "stopped"):
+                break
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/engines/session/stop")
+def stop_session() -> dict:
+    out = launcher.manager.stop()
+    if not out["stopped"] and out["state"] == "none":
+        raise HTTPException(404, "no hay sesión activa")
+    return out
