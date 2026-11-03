@@ -451,6 +451,33 @@ button.mini.danger:hover:not(:disabled) {
   color: var(--no);
 }
 
+/* ---------- banner de auto-update (U13) ---------- */
+.banner.update {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: linear-gradient(90deg, rgba(124, 58, 237, 0.16), rgba(14, 165, 233, 0.12) 60%, rgba(6, 182, 212, 0.14));
+  border: 1px solid rgba(14, 165, 233, 0.5);
+  color: var(--text);
+}
+
+.banner.update.is-error {
+  background: rgba(248, 81, 73, 0.1);
+  border-color: rgba(248, 81, 73, 0.4);
+  color: var(--no);
+}
+
+.banner-text {
+  flex: 1 1 320px;
+}
+
+.banner-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 /* ---------- jobs ---------- */
 .job {
   border-top: 1px solid var(--border);

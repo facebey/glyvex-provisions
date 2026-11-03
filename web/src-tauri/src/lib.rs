@@ -6,8 +6,9 @@
 //! 2. Si no, lo spawn-ea: en dev con el python del `.venv` (`-m app.main`,
 //!    cwd = raíz del repo); en producción con el sidecar PyInstaller empaquetado
 //!    como resource (`provisions-backend/provisions-backend.exe`).
-//! 3. Drena su stdout en un hilo (no bloquear a uvicorn escribiendo logs) y
-//!    captura el marcador `#PORT_ASSIGNED:<puerto>#`.
+//! 3. Drena stdout Y stderr en hilos (no bloquear al sidecar escribiendo; el
+//!    stderr se anexa a DATA_DIR/logs/sidecar-stderr.log) y captura el
+//!    marcador `#PORT_ASSIGNED:<puerto>#`.
 //! 4. Poll de `/api/healthz` (ureq, sin reqwest/tokio) hasta 120 s, con hasta
 //!    3 intentos de spawn.
 //! 5. Emite `sidecar-state {state, url, port}` con heartbeat cada 5 s (la
@@ -23,6 +24,7 @@ use serde::Serialize;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::thread;
@@ -36,6 +38,11 @@ const BASE_PORT: u16 = 8321;
 
 /// Hijo spawn-eado por NOSOTROS (reused no se guarda: no lo matamos).
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
+
+/// U13: parada intencional por auto-update. El ciclo de vida NO debe
+/// re-spawn-e al sidecar: el instalador NSIS necesita el lock de sus archivos
+/// para reemplazarlos (patrón stop_sidecar de la Suite).
+static STOP_FOR_UPDATE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Serialize)]
 struct SidecarState {
@@ -125,7 +132,7 @@ fn spawn_and_wait(app: &AppHandle) -> Option<u16> {
     let mut cmd = Command::new(&program);
     cmd.args(&args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .stdin(Stdio::null());
     if let Some(c) = &cwd {
         cmd.current_dir(c);
@@ -143,6 +150,47 @@ fn spawn_and_wait(app: &AppHandle) -> Option<u16> {
     }
     let mut child = cmd.spawn().ok()?;
     let stdout = child.stdout.take()?;
+
+    // Drenador de stderr: con PROV_STDOUT_PIPE=1 el console_hook deja AMBAS
+    // corrientes en la pipe, y antes stderr era null: cualquier traceback o
+    // error de arranque del sidecar se perdía. Se drena SIEMPRE (un pipe lleno
+    // bloquearía al sidecar escribiendo) y cada línea se anexa a
+    // DATA_DIR/logs/sidecar-stderr.log (mismo contrato de ruta que el log de
+    // fallback del propio sidecar en packaging/console_hook.py). Sin
+    // LOCALAPPDATA accesible: solo se drena y descarta.
+    if let Some(err) = child.stderr.take() {
+        let log_path = std::env::var("LOCALAPPDATA").ok().map(|d| {
+            PathBuf::from(d)
+                .join("glyvex-provisions")
+                .join("data")
+                .join("logs")
+                .join("sidecar-stderr.log")
+        });
+        thread::spawn(move || {
+            use std::io::Write;
+            let mut file = log_path.and_then(|p| {
+                std::fs::create_dir_all(p.parent()?).ok()?;
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&p)
+                    .ok()
+            });
+            let mut reader = BufReader::new(err);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) | Err(_) => break, // pipe cerrado
+                    Ok(_) => {
+                        if let Some(f) = &mut file {
+                            let _ = writeln!(f, "{}", line.trim_end());
+                        }
+                    }
+                }
+            }
+        });
+    }
 
     // Hilo drenador: lee stdout SIEMPRE (si el pipe se llena, uvicorn se
     // bloquea escribiendo sus logs) y reenvía el puerto del marker.
@@ -228,6 +276,9 @@ fn monitor_reused(app: &AppHandle, port: u16) {
 fn run_lifecycle(app: AppHandle) {
     let mut attempts = 0;
     loop {
+        if STOP_FOR_UPDATE.load(Ordering::SeqCst) {
+            return; // U13: stop_sidecar lo pidió (auto-update): no re-spawn
+        }
         if let Some(port) = find_existing_backend() {
             monitor_reused(&app, port);
             // el backend ajeno desapareció → se intenta levantar propio
@@ -258,12 +309,23 @@ fn kill_child() {
     }
 }
 
+/// U13: detiene el sidecar ANTES del auto-update (espejo de la Suite T6.1):
+/// con provisions-backend.exe vivo los .dll/.pyd de _internal/ quedan con lock
+/// y el NSIS falla en "Error abriendo archivo para escritura". STOP_FOR_UPDATE
+/// impide que run_lifecycle lo re-levante justo después de matarlo.
+#[tauri::command]
+fn stop_sidecar() {
+    STOP_FOR_UPDATE.store(true, Ordering::SeqCst);
+    kill_child();
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         // process:allow-restart (capabilities) lo usa el updater tras instalar;
         // sin el plugin registrado el build rechaza esa permission.
         .plugin(tauri_plugin_process::init())
+        .invoke_handler(tauri::generate_handler![stop_sidecar])
         .setup(|app| {
             let handle = app.handle().clone();
             thread::spawn(move || run_lifecycle(handle));

@@ -1,0 +1,6 @@
+[[permission]]
+identifier = "sidecar-control"
+description = "Control del sidecar (backend) desde la webview remota: parada ordenada antes del auto-update (U13)."
+commands.allow = [
+  "stop_sidecar"
+]

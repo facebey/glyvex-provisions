@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Icono de aplicación Glyvex Provisions (elegido 2026-11-02: "descarga en bandeja").
+       Fuente canónica: de aquí se derivan app-icon.png (1024, entrada de `tauri icon`),
+       los iconos de web/src-tauri/icons/ y los favicons de web/public/.
+       Paleta brand-kit: gradiente teal #0d9488 -> cyan #06b6d4 -> violeta #8b5cf6,
+       tile oscuro rx y punto de acento naranja #f97316 (mismo lenguaje que el favicon de la Suite). -->
+  <defs>
+    <linearGradient id="g" x1="180" y1="180" x2="844" y2="844" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d9488"/>
+      <stop offset="0.5" stop-color="#06b6d4"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="180" fill="#0a0a0a"/>
+  <!-- bandeja/contenedor abierto que recibe -->
+  <path d="M250 560 V735 Q250 800 315 800 H709 Q774 800 774 735 V560"
+        fill="none" stroke="url(#g)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- flecha de descarga -->
+  <path d="M472 190 H552 V420 H640 L512 585 L384 420 H472 Z" fill="url(#g)"/>
+  <circle cx="512" cy="452" r="26" fill="#f97316"/>
+</svg>

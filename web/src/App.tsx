@@ -39,6 +39,13 @@ import {
   searchModels,
   submitDownload,
 } from './api'
+import {
+  type UpdateInfo,
+  checkForUpdate,
+  isTauri,
+  relaunchApp,
+  stopSidecar,
+} from './tauri'
 
 interface JobView {
   id: string
@@ -81,6 +88,63 @@ export default function App() {
   const [models, setModels] = useState<ModelHit[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // U13: auto-update (espejo de la Suite T6.1). Inerte fuera de la shell Tauri
+  // (en el navegador de dev isTauri() es false y esto nunca se activa).
+  const [update, setUpdate] = useState<UpdateInfo | null>(null)
+  const [updateState, setUpdateState] = useState<'available' | 'downloading' | 'error'>('available')
+  const [updateProgress, setUpdateProgress] = useState(-1) // -1: total aún desconocido
+  const [updateError, setUpdateError] = useState('')
+  const [updateDismissed, setUpdateDismissed] = useState(false)
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let cancelled = false
+    void (async () => {
+      try {
+        // Silencioso a propósito: sin red o sin feed no se molesta al usuario.
+        const u = await checkForUpdate()
+        if (u && !cancelled) {
+          setUpdate(u)
+          setUpdateState('available')
+        }
+      } catch {
+        /* el updater no debe romper la app */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const installUpdate = async () => {
+    const upd = update
+    if (!upd?.downloadAndInstall) return
+    setUpdateState('downloading')
+    setUpdateProgress(-1)
+    setUpdateError('')
+    try {
+      // El NSIS no puede sobrescribir _internal/ con el backend vivo: pedimos a
+      // Rust que lo detenga (stop_sidecar) y NO lo re-levante. La SPA ya está
+      // en memoria: la descarga e instalación siguen aunque el backend caiga.
+      await stopSidecar()
+      let total = 0
+      let done = 0
+      await upd.downloadAndInstall((ev) => {
+        if (ev?.event === 'Started' && ev.data?.contentLength) {
+          total = ev.data.contentLength
+        } else if (ev?.event === 'Progress') {
+          done += ev.data?.chunkLength ?? 0
+          if (total) setUpdateProgress(Math.min(100, Math.round((done / total) * 100)))
+        } else if (ev?.event === 'Finished') {
+          setUpdateProgress(100)
+        }
+      })
+      await relaunchApp()
+    } catch (e) {
+      setUpdateError(e instanceof Error ? e.message || String(e.stack ?? e) : String(e))
+      setUpdateState('error')
+    }
+  }
   const [repo, setRepo] = useState<RepoData | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dest, setDest] = useState<string>('')  // R11: path de storage elegido
@@ -711,19 +775,19 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <span className="logo">
-            {/* Logo Glyvex AI (brand kit oficial) — diamante teal + punto naranja (idéntico a ai-suite.glyvexgroup.com) */}
-            <svg viewBox="0 0 80 80" width="24" height="24" role="img" aria-label="Glyvex AI">
+            {/* Isotopo Glyvex Provisions (2026-11-02): "descarga en bandeja" — mismo glyph que
+                assets/brand/app-icon.svg, recortado al trazo (sin tile) para el lockup del header. */}
+            <svg viewBox="176 180 672 672" width="24" height="24" role="img" aria-label="Glyvex Provisions">
               <defs>
-                <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <linearGradient id="logoGrad" x1="208" y1="190" x2="816" y2="842" gradientUnits="userSpaceOnUse">
                   <stop offset="0%" stopColor="#0d9488" />
                   <stop offset="50%" stopColor="#06b6d4" />
-                  <stop offset="100%" stopColor="#0ea5e9" />
+                  <stop offset="100%" stopColor="#8b5cf6" />
                 </linearGradient>
               </defs>
-              <polygon points="40,12 66,38 40,72 14,38" fill="url(#logoGrad)" />
-              <polygon points="40,12 66,38 40,40" fill="#0d9488" opacity="0.35" />
-              <polygon points="40,40 66,38 40,72" fill="#0ea5e9" opacity="0.25" />
-              <circle cx="40" cy="38" r="4.5" fill="#f97316" />
+              <path d="M250 560 V735 Q250 800 315 800 H709 Q774 800 774 735 V560" fill="none" stroke="url(#logoGrad)" strokeWidth="84" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M472 190 H552 V420 H640 L512 585 L384 420 H472 Z" fill="url(#logoGrad)" />
+              <circle cx="512" cy="452" r="44" fill="#f97316" />
             </svg>
           </span> Glyvex Provisions
           <span className="sub">tu hardware → modelos que caben</span>
@@ -740,6 +804,45 @@ export default function App() {
           ))}
         </div>
       </header>
+
+      {/* U13: banner de auto-update (solo aparece si el feed firmado publicó
+          una versión nueva; discreto, con opción a posponerlo). */}
+      {update && !updateDismissed && (
+        <div className={updateState === 'error' ? 'banner update is-error' : 'banner update'}>
+          {updateState === 'available' && (
+            <>
+              <span className="banner-text">
+                Glyvex Provisions <strong>{update.version}</strong> está disponible. Puedes
+                actualizar sin salir de la app.
+              </span>
+              <span className="banner-actions">
+                <button className="primary" onClick={() => void installUpdate()}>
+                  Actualizar y reiniciar
+                </button>
+                <button className="mini" onClick={() => setUpdateDismissed(true)}>
+                  Más tarde
+                </button>
+              </span>
+            </>
+          )}
+          {updateState === 'downloading' && (
+            <span className="banner-text">
+              Descargando la actualización…
+              {updateProgress >= 0 ? ` ${updateProgress}%` : ''}
+            </span>
+          )}
+          {updateState === 'error' && (
+            <>
+              <span className="banner-text">La actualización no se pudo completar: {updateError}</span>
+              <span className="banner-actions">
+                <button className="mini" onClick={() => setUpdateState('available')}>
+                  Reintentar
+                </button>
+              </span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Panel de hardware: el perfil elegido (local auto o manual) */}
       <section className="panel hw">

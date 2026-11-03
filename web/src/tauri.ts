@@ -20,6 +20,51 @@
  * (app 100% offline, licencia SIL OFL 1.1 incluida).
  */
 
+// ---------------------------------------------------------------------------
+// U13: auto-update — espejo de `tauri.js` de la Suite (T6.1). Inactivo fuera
+// de la shell Tauri: en el navegador de dev isTauri() es false. Imports
+// dinámicos: el IPC de los plugins no se carga en el navegador.
+// ---------------------------------------------------------------------------
+
+export function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+// Detiene el sidecar ANTES del auto-update (igual que la Suite): con
+// provisions-backend.exe vivo, _internal/ queda con lock y el instalador NSIS
+// falla. En Rust, STOP_FOR_UPDATE evita que el ciclo lo re-spawn-e.
+export async function stopSidecar(): Promise<void> {
+  if (!isTauri()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('stop_sidecar')
+}
+
+// check() resuelve con el objeto Update (tiene .downloadAndInstall) o null si
+// ya está en la última versión. Tipo mínimo propio para no acoplar App.tsx a
+// los tipos del plugin.
+export interface UpdateInfo {
+  version: string
+  body?: string | null
+  date?: string | null
+  downloadAndInstall?: (
+    cb?: (ev: { event?: string; data?: { contentLength?: number; chunkLength?: number } }) => void,
+  ) => Promise<boolean>
+}
+
+export async function checkForUpdate(): Promise<UpdateInfo | null> {
+  if (!isTauri()) return null
+  const { check } = await import('@tauri-apps/plugin-updater')
+  return (await check()) as UpdateInfo | null
+}
+
+// Tras instalar, reinicia la app (en Windows el instalador reemplaza y la
+// app se cierra sola).
+export async function relaunchApp(): Promise<void> {
+  if (!isTauri()) return
+  const { relaunch } = await import('@tauri-apps/plugin-process')
+  await relaunch()
+}
+
 function splashStyleTag(): string {
   return `
     @font-face { font-family: Poppins; font-weight: 400; src: url(/fonts/poppins-regular.woff2) format("woff2"); }
@@ -46,22 +91,22 @@ function splashStyleTag(): string {
   `
 }
 
-// Isotipo del brand kit (igual al BootLogo de la Suite; SVG embebido, sin
-// assets externos: el splash pinta antes de cualquier red).
+// Isotopo "descarga en bandeja" (mismo glyph que assets/brand/app-icon.svg, sin tile:
+// el fondo del splash ya es oscuro; SVG embebido, sin assets externos: el splash pinta
+// antes de cualquier red).
 function splashLogoSvg(): string {
   return `
-    <svg class="prov-splash-logo" width="112" height="112" viewBox="100 100 824 824" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="512" cy="512" r="356" fill="none" stroke="#7c3aed" stroke-width="22"/>
-      <line x1="203.7" y1="334.0" x2="820.3" y2="690.0" stroke="#a77bf3" stroke-opacity="1" stroke-width="16" stroke-linecap="round"/>
-      <line x1="203.7" y1="690.0" x2="820.3" y2="334.0" stroke="#06b6d4" stroke-opacity="0.9" stroke-width="16" stroke-linecap="round"/>
-      <circle cx="512" cy="512" r="102" fill="#7c3aed"/>
-      <line x1="512.0" y1="156.0" x2="512.0" y2="868.0" stroke="#0ea5e9" stroke-opacity="0.95" stroke-width="16" stroke-linecap="round"/>
-      <circle cx="512.0" cy="156.0" r="57" fill="#0ea5e9"/>
-      <circle cx="820.3" cy="334.0" r="57" fill="#06b6d4"/>
-      <circle cx="820.3" cy="690.0" r="57" fill="#7c3aed"/>
-      <circle cx="512.0" cy="868.0" r="57" fill="#0ea5e9"/>
-      <circle cx="203.7" cy="690.0" r="57" fill="#06b6d4"/>
-      <circle cx="203.7" cy="334.0" r="57" fill="#7c3aed"/>
+    <svg class="prov-splash-logo" width="112" height="112" viewBox="176 180 672 672" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="prov-splash-grad" x1="208" y1="190" x2="816" y2="842" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#0d9488"/>
+          <stop offset="50%" stop-color="#06b6d4"/>
+          <stop offset="100%" stop-color="#8b5cf6"/>
+        </linearGradient>
+      </defs>
+      <path d="M250 560 V735 Q250 800 315 800 H709 Q774 800 774 735 V560" fill="none" stroke="url(#prov-splash-grad)" stroke-width="84" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M472 190 H552 V420 H640 L512 585 L384 420 H472 Z" fill="url(#prov-splash-grad)"/>
+      <circle cx="512" cy="452" r="44" fill="#f97316"/>
     </svg>
   `
 }

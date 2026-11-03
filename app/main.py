@@ -87,6 +87,10 @@ def _bind_with_fallback(host: str, preferred: int) -> tuple[socket.socket, int]:
     pudiera ocuparlo. Con `preferred == 0` se pide directo al SO."""
     candidates = [preferred] if preferred else [0]
     candidates += [p for p in range(preferred + 1, preferred + 10)]
+    if preferred:
+        # último recurso: puerto libre asignado por el SO (lo que promete el
+        # docstring; sin esto la escalera moría en preferred+9)
+        candidates.append(0)
     last_err: OSError | None = None
     for candidate in candidates:
         # Sin SO_REUSEADDR: en Windows ese flag hace que bind() EXITA sobre un
