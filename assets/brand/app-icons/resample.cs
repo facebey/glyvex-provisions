@@ -123,6 +123,46 @@ public class IconResample {
     return HDown(VDown(s, th), tw);
   }
 
+  // Mascara rectangulo redondeado exacta (tile del SVG: rx=180 en canvas 1024).
+  // Deja transparentes las zonas fuera del tile, IGNORANDO el fondo blanco opaco
+  // que trajo el rasterizado del PNG fuente (causa real de las 'cuatro puntas
+  // blancas' reportadas: los vertices blancos se mezclaban en los frames chicos).
+  // Coverage geometrico por sub-muestreo 4x4 (AA analitico, premultiplicado).
+  public static void ApplyRoundMask(Img img, int radiusPx, int canvasRef) {
+    double r = (double)radiusPx * img.W / canvasRef; // rx escalado al tamano actual
+    int W = img.W, H = img.H;
+    for (int y = 0; y < H; y++) {
+      for (int x = 0; x < W; x++) {
+        double cov = 0;
+        for (int sy = 0; sy < 4; sy++) {
+          double py = y + (sy + 0.5) / 4.0;
+          for (int sx = 0; sx < 4; sx++) {
+            double px = x + (sx + 0.5) / 4.0;
+            if (InsideRoundRect(px, py, W, H, r)) cov += 1.0;
+          }
+        }
+        cov /= 16.0;
+        if (cov >= 1.0) continue;
+        int i = y * W + x;
+        img.A[i] *= cov;
+        img.PR[i] *= cov; img.PG[i] *= cov; img.PB[i] *= cov;
+        if (cov <= 0.0) { img.PR[i] = 0; img.PG[i] = 0; img.PB[i] = 0; }
+      }
+    }
+  }
+
+  static bool InsideRoundRect(double px, double py, double W, double H, double r) {
+    if (px < 0 || py < 0 || px >= W || py >= H) return false;
+    double cxMin = r, cxMax = W - r, cyMin = r, cyMax = H - r;
+    double cx = px, cy = py;
+    if (px < cxMin && py < cyMin) { cx = r; cy = r; }
+    else if (px > cxMax && py < cyMin) { cx = W - r; cy = r; }
+    else if (px < cxMin && py > cyMax) { cx = r; cy = H - r; }
+    else if (px > cxMax && py > cyMax) { cx = W - r; cy = H - r; }
+    double dx = px - cx, dy = py - cy;
+    return dx * dx + dy * dy <= r * r;
+  }
+
   public static byte[] ToPng(Img img) {
     using (Bitmap bmp = new Bitmap(img.W, img.H, PixelFormat.Format32bppArgb)) {
       Rectangle rect = new Rectangle(0, 0, img.W, img.H);

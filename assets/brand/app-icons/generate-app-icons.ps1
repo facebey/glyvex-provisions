@@ -1,14 +1,16 @@
 # generate-app-icons.ps1 — set de iconos de aplicacion (Windows + favicons PNG).
 # Fuente canonica: assets/brand/app-icon.png (1024, derivada de app-icon.svg).
 #
-# Por que un generador propio: `tauri icon` re-muestrea el PNG 1024 con Lanczos,
-# que produce OVERSHOOT (ringing) en trazos brillantes sobre tile oscuro -> las
-# puntas superiores de la bandeja salen con pixels blancos en 16-32px (reportado
-# por Fabian 2026-11-02). Este script re-muestrea con BOX (promedio de area
-# separable, luz lineal alfa-premultiplicada) en piramide por halvings: 1024 ->
-# 512 -> 256 -> 128 -> 64 -> 32 -> 16, y desde el nivel mas cercano >=2x al
-# target genera los tamaños no-binarios (24 desde 32, 48 desde 64, 180 desde
-# 256). Sin ringing: bordes limpios, sin puntas blancas.
+# Por que un generador propio: `tauri icon` re-muestrea el PNG 1024 con Lanczos
+# (overshoot/ringing en trazos brillantes). PERO la causa principal de las
+# "cuatro puntas blancas" (Fabian 2026-11-02) era otra: app-icon.png salio del
+# rasterizado del SVG opaco con FONDO BLANCO en los vertices fuera del tile
+# redondeado; esos blancos se mezclaban en los frames 16-32px. Este script:
+#   1) aplica mascara geometrica exacta del tile (rx=180) -> vertices transparentes
+#   2) re-muestrea con BOX (promedio de area separable, luz lineal
+#      alfa-premultiplicada) en piramide por halvings: 1024 -> 512 -> ... -> 16,
+#      y desde el nivel mas cercano >=2x genera los tamanos no-binarios
+#      (24 desde 32, 48 desde 64, 180 desde 256). Sin ringing y sin puntas.
 #
 # Escribe:
 #   web/src-tauri/icons/  32x32.png 64x64.png 128x128.png 128x128@2x.png
@@ -30,6 +32,15 @@ $srcPath = Join-Path $root "assets\brand\app-icon.png"
 
 $src = [IconResample]::FromFile($srcPath)
 if ($src.W -ne 1024 -or $src.H -ne 1024) { throw "app-icon.png debe ser 1024x1024" }
+
+# Mascara del tile redondeado (rx=180): los vertices fuera del tile quedan
+# TRANSPARENTES. El PNG fuente salio opaco con fondo blanco en las esquinas
+# (rasterizado del SVG aplanado sobre blanco); esa fue la causa real de las
+# 'cuatro puntas blancas' en tamaños chicos, no el ringing. Reescribimos
+# tambien app-icon.png canonico con transparencia (coherente con el SVG).
+[IconResample]::ApplyRoundMask($src, 180, 1024)
+[IconResample]::SavePng($srcPath, $src)
+Write-Host "OK app-icon.png re-escrito con esquinas transparentes (mask rx=180)"
 
 # Piramide por halvings (box exacto en cada paso).
 $p512 = [IconResample]::Box($src, 512, 512)
