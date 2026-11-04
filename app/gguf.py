@@ -22,10 +22,20 @@ reales; NO confundir con el orden alternativo STRING=11/ARRAY=12):
          8 string(len u64+utf8) | 9 array(elem vtype u32 + count u64) |
          10 u64 | 11 i64 | 12 f64
 
-KV (convención llama.cpp, cache F16 por defecto):
-  kv/token = capas_kv x heads_kv x (dim_K + dim_V) x 2 bytes
-  dims explícitos via attention.key_length/value_length si existen; si no,
-  head_dim = embedding_length / head_count. MLA/SSM no encajan: None.
+KV por capa (alineado con la Suite, backend/vram_estimate.py, commit
+6e0017a "EST-SWA"; llama.cpp como referencia de medida): cada capa de
+atención reserva window x kv_heads x (dim_K + dim_V) x 2 bytes, con
+window = contexto en atención completa y min(contexto, sliding_window)
+en las capas marcadas por <arch>.attention.sliding_window_pattern (solo
+el escalar sliding_window = SWA uniforme en todas las capas). En gemma4
+los heads cambian POR CAPA (head_count_kv es un array i32: se
+materializa hasta _MAX_SCALAR_ARRAY, igual que la Suite). Híbridos SSM
+(full_attention_interval=N): las capas no-atención no crecen con el
+contexto — se suma su estado recurrente FIJO (ssm.*, fp32). Sin esos
+campos el resultado es idéntico al modelo denso:
+  kv/token = capas x heads_kv x (dim_K + dim_V) x 2 bytes, dims
+  explícitos via attention.key_length/value_length si existen; si no,
+  head_dim = embedding_length / head_count. Sin campos mínimos: None.
 """
 from __future__ import annotations
 
@@ -35,6 +45,10 @@ from resumable import prefetch_head
 
 PROBE_CAP = 1024 * 1024  # el bloque de hparams termina ~1 KB; 1 MB sobra
 KV_DTYPE_BYTES = 2       # cache F16, default de llama.cpp (k_cache_type)
+# Arrays de scalares que se materializan como lista (head_count_kv y
+# sliding_window_pattern por capa en gemma4); los más grandes solo se
+# saltan (misma regla _GGUF_MAX_SCALAR_ARRAY que la Suite).
+_MAX_SCALAR_ARRAY = 4096
 
 _T = struct.Struct
 _FMT = {  # vtype oficial -> (formato struct, tamaño)
@@ -47,9 +61,15 @@ _T_STRING, _T_ARRAY = 8, 9
 
 # Claves necesarias para estimar KV (prefijo tras "<arch>.")
 _REQ_KEYS = (".block_count", ".attention.head_count", ".embedding_length")
-# Opcionales del mismo bloque (GQA y dims de cabeza explícitas)
+# Opcionales del mismo bloque: GQA y dims de cabeza, Sliding Window
+# Attention (gemma4/gemma3: head_count_kv y sliding_window_pattern son
+# arrays POR CAPA) y estado recurrente de híbridos SSM.
 _OPT_KEYS = (".attention.layer_count_kv", ".attention.head_count_kv",
-             ".attention.key_length", ".attention.value_length")
+             ".attention.key_length", ".attention.value_length",
+             ".attention.key_length_swa", ".attention.value_length_swa",
+             ".attention.sliding_window", ".attention.sliding_window_pattern",
+             ".full_attention_interval",
+             ".ssm.inner_size", ".ssm.state_size", ".ssm.conv_kernel")
 
 # Meta por REPO (no por archivo): todos los quant de un modelo comparten
 # hparams; sondear cada archivo repetiría la red por nada. Negativos también
@@ -105,7 +125,10 @@ class _Reader:
 def _read_value(r: _Reader, vtype: int, keep: bool):
     """Consume un valor GGUF. Con keep=False solo avanza el offset sin
     materializar; los arrays de scalares se saltan en bloque (el vocabulario
-    puede tener 150k+ elementos)."""
+    puede tener 150k+ elementos). Con keep=True los arrays de scalares
+    chicos (<= _MAX_SCALAR_ARRAY) se materializan como lista: los hparams
+    por capa de gemma4 (head_count_kv, sliding_window_pattern) caben de
+    sobra; los arrays del tokenizer siguen sin leerse."""
     fmt = _FMT.get(vtype)
     if fmt is not None:
         raw = r.take(fmt.size)
@@ -119,7 +142,11 @@ def _read_value(r: _Reader, vtype: int, keep: bool):
         count = r.u64()
         esz = _FMT[elem].size if elem in _FMT else None
         if esz is not None:
-            r.take(esz * count)  # array de scalares: salto en bloque
+            raw = r.take(esz * count)  # array de scalares: salto en bloque
+            if keep and 0 < count <= _MAX_SCALAR_ARRAY:
+                ef = _FMT[elem]
+                return [ef.unpack_from(raw, off)[0]
+                        for off in range(0, len(raw), esz)]
         else:
             for _ in range(count):  # strings u arrays anidados
                 _read_value(r, elem, False)
@@ -168,7 +195,12 @@ def parse_header(head: bytes | None) -> dict | None:
                     return None
                 arch = val
                 meta[key] = val
-            elif interesting and isinstance(val, (int, float)) and not isinstance(val, bool):
+            elif interesting and (
+                    (isinstance(val, (int, float)) and not isinstance(val, bool))
+                    # Arrays por capa de gemma4: head_count_kv (i32) y
+                    # sliding_window_pattern (bool); se guardan tal cual.
+                    or (isinstance(val, list) and val and all(
+                        isinstance(x, (int, float)) for x in val))):
                 meta[key] = val
         return meta if arch else None
     except (_Truncated, ValueError, struct.error):
@@ -179,8 +211,15 @@ def parse_header(head: bytes | None) -> dict | None:
 def kv_cache_bytes(meta: dict | None, context: int) -> tuple[int, str] | None:
     """(bytes_kv_para_context, detalle_humano) | None si no se puede estimar.
 
-    Válido solo para atención transformer estándar (block_count +
-    head_count + embedding_length). SSM/Mamba/MLA y similares: None.
+    Modelo por capa (alineado con la Suite, backend/vram_estimate.py,
+    commit 6e0017a "EST-SWA"): cada capa de atención suma
+    window x kv_heads x (dim_K + dim_V) x KV_DTYPE_BYTES, con window =
+    contexto en atención completa y min(contexto, sliding_window) en las
+    capas del patrón (sliding_window escalar solo = SWA uniforme). En
+    gemma4 kv_heads cambia por capa (head_count_kv array). Híbridos SSM
+    (full_attention_interval=N): las capas SSM no crecen con el contexto;
+    se suma su estado recurrente fijo (ssm.*, fp32). Sin esos campos el
+    resultado es idéntico al modelo denso plano.
     """
     if not meta:
         return None
@@ -190,9 +229,21 @@ def kv_cache_bytes(meta: dict | None, context: int) -> tuple[int, str] | None:
 
     def num(suffix: str) -> int | None:
         v = meta.get(arch + suffix)
+        if isinstance(v, list):
+            v = v[0] if v else None  # array -> primera capa (regla Suite)
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             return None
         return int(v) if v and v > 0 else None
+
+    def layer_arr(suffix: str, allow_bool: bool = False) -> list | None:
+        v = meta.get(arch + suffix)
+        if not (isinstance(v, list) and v):
+            return None
+        for x in v:
+            if not isinstance(x, (int, float)) or (isinstance(x, bool)
+                                                   and not allow_bool):
+                return None
+        return v
 
     layers = num(".attention.layer_count_kv") or num(".block_count")
     heads = num(".attention.head_count")
@@ -200,7 +251,7 @@ def kv_cache_bytes(meta: dict | None, context: int) -> tuple[int, str] | None:
     kdim = num(".attention.key_length")
     vdim = num(".attention.value_length")
     if kdim and vdim:
-        kv_dims = kdim + vdim  # dims explícitas por cabeza K/V
+        full_dims = kdim + vdim  # dims explícitas por cabeza K/V
         head_note = f"K{kdim}+V{vdim}"
     else:
         hidden = num(".embedding_length")
@@ -209,11 +260,57 @@ def kv_cache_bytes(meta: dict | None, context: int) -> tuple[int, str] | None:
         head_dim = hidden // heads
         if head_dim <= 0:
             return None
-        kv_dims = 2 * head_dim
+        full_dims = 2 * head_dim
         head_note = f"2x{head_dim} (head_dim)"
     if not (layers and heads_kv):
         return None
-    per_token = layers * heads_kv * kv_dims * KV_DTYPE_BYTES
-    total = per_token * context
+
+    # Campos por capa (ausentes en los densos: el bucle degenera a la
+    # fórmula plana y el total queda idéntico al de antes del port).
+    interval = num(".full_attention_interval")
+    swa_window = num(".attention.sliding_window")
+    pattern = layer_arr(".attention.sliding_window_pattern", allow_bool=True)
+    kv_heads_layers = layer_arr(".attention.head_count_kv")
+    swa_dim = num(".attention.key_length_swa")
+
+    n_ssm = n_swa = kv_units = 0
+    for i in range(layers):
+        if interval and interval > 1 and (i + 1) % interval != 0:
+            n_ssm += 1  # estado recurrente fijo: no crece con el contexto
+            continue
+        # Sin patrón por capa, sliding_window escalar = SWA uniforme
+        # (mistral/gemma2 deslizan en todas); patrón más corto que n_layer
+        # se completa como atención completa (no inventar patrones).
+        if pattern is not None and i < len(pattern):
+            sliding = bool(pattern[i])
+        else:
+            sliding = swa_window is not None and swa_window > 0
+        window = min(context, swa_window) if sliding and swa_window else context
+        kv_heads = (kv_heads_layers[i] if kv_heads_layers
+                    and i < len(kv_heads_layers) else heads_kv)
+        dims = 2 * swa_dim if sliding and swa_window and swa_dim else full_dims
+        if sliding and swa_window:
+            n_swa += 1
+        kv_units += window * int(kv_heads) * int(dims)
+
+    ssm_bytes = 0
+    if n_ssm:
+        inner, state = num(".ssm.inner_size"), num(".ssm.state_size")
+        if inner and state:  # sin params SSM: 0 (mejor subestimar)
+            conv = num(".ssm.conv_kernel") or 0
+            ssm_bytes = n_ssm * inner * (state + conv) * 4
+    total = kv_units * KV_DTYPE_BYTES + ssm_bytes
+
+    if n_ssm or n_swa:
+        parts = []
+        if n_swa:
+            parts.append(f"{n_swa} SWA@{swa_window}")
+        parts.append(f"{layers - n_swa - n_ssm} full")
+        if n_ssm:
+            parts.append(f"{n_ssm} SSM ({ssm_bytes // (1024 * 1024)} MiB fijos)")
+        return total, (f"{arch}: {layers} capas ({' + '.join(parts)}) "
+                       f"x heads/dims por capa F16")
+
+    per_token = layers * heads_kv * full_dims * KV_DTYPE_BYTES
     return total, (f"{arch}: {layers} capas x {heads_kv} heads KV x "
                    f"{head_note} F16 = {per_token // 1024} KiB/token")
