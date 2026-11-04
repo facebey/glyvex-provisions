@@ -37,7 +37,7 @@ from pathlib import Path
 
 import httpx2
 
-from . import gguf, hardware, profiles, settings as st, suite
+from . import fit, gguf, hardware, profiles, settings as st, suite
 from .paths import DATA_DIR
 
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -49,7 +49,12 @@ OLLAMA_PORT = 11434
 OLLAMA_BASE = f"http://127.0.0.1:{OLLAMA_PORT}"
 
 ENGINES_FILE = DATA_DIR / "engines.json"
+PRESETS_FILE = DATA_DIR / "presets.json"
 OLLAMA_DIR = DATA_DIR / "ollama"
+
+# U16: escenarios de preset (cómo lanzar, no qué modelo)
+PRESET_SCENARIOS = ("chat", "vision", "offload")
+ENGINE_IDS = ("auto", "suite", "user", "ollama")
 
 # Estados de una sesión: starting -> verifying -> ready | failed -> stopped
 STATES = ("starting", "verifying", "ready", "failed", "stopped")
@@ -92,6 +97,112 @@ def save_engines(user_binary: str | None) -> dict:
         json.dumps({"user_binary": user_binary}, ensure_ascii=False, indent=2),
         encoding="utf-8")
     return get_engines()
+
+
+# ---------------------------------------------------------------------------
+# U16: presets de lanzamiento (data/presets.json — mismo patrón que engines)
+# Un preset describe CÓMO lanzar (engine, régimen, contexto, mmproj, args
+# extra), nunca qué modelo: la UI lo aplica rellenando el formulario y el
+# launch sigue siendo explícito.
+# ---------------------------------------------------------------------------
+
+
+def _presets_disk() -> list[dict]:
+    try:
+        raw = json.loads(PRESETS_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+    return [p for p in raw if isinstance(p, dict)] if isinstance(raw, list) else []
+
+
+def _write_presets(items: list[dict]) -> None:
+    PRESETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PRESETS_FILE.write_text(
+        json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _sanitize_preset(p: dict, preset_id: str | None = None) -> dict:
+    """Valida y normaliza un preset. `ValueError` -> 422 en la API."""
+    name = str(p.get("name") or "").strip()
+    if not name:
+        raise ValueError("falta el nombre del preset")
+    scenario = str(p.get("scenario") or "chat")
+    if scenario not in PRESET_SCENARIOS:
+        raise ValueError(
+            f"escenario inválido: {scenario} (usa chat, vision u offload)")
+    engine = str(p.get("engine") or "auto")
+    if engine not in ENGINE_IDS:
+        raise ValueError(f"engine inválido: {engine}")
+    regime = str(p.get("regime") or "gpu")
+    if regime not in fit.REGIMES:
+        raise ValueError(f"régimen inválido: {regime}")
+    if scenario == "offload":
+        regime = "offload"  # el escenario fija el régimen
+    mmproj = str(p.get("mmproj") or "").strip() or None
+    if scenario == "vision" and not mmproj:
+        raise ValueError(
+            "el escenario vision requiere mmproj (proyección de imagen)")
+    context = p.get("context") or st.DEFAULTS["context"]
+    try:
+        context = int(context)
+    except (TypeError, ValueError):
+        raise ValueError(f"contexto inválido: {context}")
+    if context not in st.CONTEXTS:
+        raise ValueError(f"contexto inválido: {context}")
+    port = p.get("port")
+    if port not in (None, ""):
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            raise ValueError(f"puerto inválido: {port}")
+        if not 1 <= port <= 65535:
+            raise ValueError(f"puerto fuera de rango: {port}")
+    return {
+        "id": preset_id or uuid.uuid4().hex[:8],
+        "name": name,
+        "scenario": scenario,
+        "engine": engine,
+        "profile_id": str(p.get("profile_id") or profiles.AUTO_ID),
+        "regime": regime,
+        "context": context,
+        "port": port,
+        "mmproj": mmproj,
+        "extra_args": str(p.get("extra_args") or "").strip(),
+    }
+
+
+def get_presets() -> list[dict]:
+    return _presets_disk()
+
+
+def create_preset(p: dict) -> dict:
+    item = _sanitize_preset(p)
+    items = _presets_disk()
+    if any(it.get("name") == item["name"] for it in items):
+        raise ValueError(f"ya existe un preset llamado {item['name']!r}")
+    items.append(item)
+    _write_presets(items)
+    return item
+
+
+def update_preset(preset_id: str, p: dict) -> dict:
+    items = _presets_disk()
+    idx = next((i for i, it in enumerate(items)
+                if it.get("id") == preset_id), None)
+    if idx is None:
+        raise KeyError(f"preset inexistente: {preset_id}")
+    item = _sanitize_preset({**items[idx], **p}, preset_id)
+    items[idx] = item
+    _write_presets(items)
+    return item
+
+
+def delete_preset(preset_id: str) -> None:
+    items = _presets_disk()
+    kept = [it for it in items if it.get("id") != preset_id]
+    if len(kept) == len(items):
+        raise KeyError(f"preset inexistente: {preset_id}")
+    _write_presets(kept)
 
 
 # ---------------------------------------------------------------------------

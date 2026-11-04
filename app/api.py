@@ -435,6 +435,51 @@ def put_engines(body: EnginesBody) -> dict:
     return launcher.save_engines(path or None)
 
 
+# U16: presets de lanzamiento (cómo lanzar, no qué modelo)
+class PresetReq(BaseModel):
+    name: str
+    scenario: str = "chat"          # chat | vision | offload
+    engine: str = "auto"            # auto | suite | user | ollama
+    profile_id: str = profiles.AUTO_ID
+    regime: str = "gpu"             # fit.REGIMES (offload lo fija el escenario)
+    context: int | None = None      # st.CONTEXTS (default: st.DEFAULTS)
+    port: int | None = None
+    mmproj: str | None = None
+    extra_args: str = ""            # free-form; se ve tal cual en el preview
+
+
+@router.get("/launcher/presets")
+def list_presets() -> dict:
+    return {"presets": launcher.get_presets()}
+
+
+@router.post("/launcher/presets", status_code=201)
+def create_preset(body: PresetReq) -> dict:
+    try:
+        return launcher.create_preset(body.model_dump())
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.put("/launcher/presets/{preset_id}")
+def update_preset(preset_id: str, body: PresetReq) -> dict:
+    try:
+        return launcher.update_preset(preset_id, body.model_dump())
+    except KeyError:
+        raise HTTPException(404, f"preset inexistente: {preset_id}")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@router.delete("/launcher/presets/{preset_id}")
+def delete_preset(preset_id: str) -> dict:
+    try:
+        launcher.delete_preset(preset_id)
+    except KeyError:
+        raise HTTPException(404, f"preset inexistente: {preset_id}")
+    return {"ok": True}
+
+
 @router.get("/suite")
 def suite_status() -> dict:
     return suite.status()
