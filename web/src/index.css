@@ -561,3 +561,92 @@ button.mini.danger:hover:not(:disabled) {
   font-size: 0.78rem;
   margin-top: 24px;
 }
+
+/* ---------- U15: lanzador de modelos ---------- */
+.launcher .engines-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.launcher .eng {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--chip-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.launcher .eng .dot { width: 8px; height: 8px; border-radius: 50%; }
+.launcher .eng.on .dot { background: var(--ok); }
+.launcher .eng.off .dot { background: var(--no); }
+.launcher .eng.off { opacity: 0.7; }
+
+.launcher .session {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--panel);
+}
+
+.launcher .session .meta {
+  font-size: 0.82rem;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.launcher .session .metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.launcher .metric {
+  background: var(--chip-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+.launcher .metric .k { color: var(--muted); font-size: 0.72rem; }
+.launcher .metric .v { font-weight: 600; }
+
+.launcher .logbox {
+  margin-top: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.launcher .state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 6px;
+}
+.launcher .state .dot { width: 9px; height: 9px; border-radius: 50%; }
+.launcher .state.starting .dot { background: var(--accent); }
+.launcher .state.verifying .dot { background: var(--tight); }
+.launcher .state.ready .dot { background: var(--ok); }
+.launcher .state.failed .dot { background: var(--no); }
+.launcher .state.stopped .dot { background: var(--muted); }

@@ -360,6 +360,168 @@ export const retryDownload = (jobId: string) =>
     json<{ id: string; status: string }>(r),
   )
 
+// ---------------------------------------------------------------------------
+// U15: lanzador de modelos + integración Glyvex-AI-Suite (ecosistema).
+// La Suite se toca solo por su API pública; el registro es un handoff de
+// una vez (la carpeta queda bajo jurisdicción de la Suite).
+// ---------------------------------------------------------------------------
+
+export interface EngineInfo {
+  id: string // 'suite' | 'user' | 'ollama'
+  label: string
+  kind: 'llama' | 'ollama'
+  path: string | null
+  pin: string | null
+  ok: boolean
+  version: string | null
+  supports_ts: boolean
+  detail: string | null
+}
+
+export interface EnginesData {
+  engines: { engines: EngineInfo[]; available: string[] }
+  user_binary: string | null
+}
+
+export interface ManagedRuntime {
+  path: string
+  pin: string
+  executable: string
+  data_dir?: string
+}
+
+export interface SuiteStatus {
+  running: boolean
+  port: number
+  version: string | null
+  data_dir: string
+  managed_runtime: ManagedRuntime | null
+}
+
+export interface SuiteRegisterResult {
+  registered_folder: string
+  was_already_configured: boolean
+  model_dirs: string[]
+  new_models: number
+  total: number | null
+}
+
+export interface VramSnap {
+  name: string
+  total_gb: number
+  free_gb: number
+}
+
+export interface SessionMetrics {
+  ttfb_ms: number | null
+  tokens: number
+  tok_s: number | null
+  vram: VramSnap[]
+  model_id: string
+  response?: string
+}
+
+export type SessionState =
+  | 'starting'
+  | 'verifying'
+  | 'ready'
+  | 'failed'
+  | 'stopped'
+
+export interface SessionInfo {
+  id: string
+  model_path: string
+  engine: string
+  engine_label: string
+  kind: 'llama' | 'ollama'
+  port: number
+  n_ctx: number
+  ngl: number
+  ngl_detail: string | null
+  ts: number[] | null
+  regime: string
+  state: SessionState
+  error: string | null
+  metrics: SessionMetrics | null
+  ollama_model: string | null
+  uptime_s: number
+  log_tail: string[]
+}
+
+export interface LaunchReq {
+  model_path: string
+  engine: string
+  profile_id: string
+  regime: Regime
+  context: number
+  port?: number | null
+}
+
+export const getEngines = () =>
+  fetch('/api/engines').then((r) => json<EnginesData>(r))
+
+export const saveEngines = (userBinary: string | null) =>
+  fetch('/api/engines', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_binary: userBinary }),
+  }).then((r) => json<{ user_binary: string | null }>(r))
+
+export const getSuiteStatus = () =>
+  fetch('/api/suite').then((r) => json<SuiteStatus>(r))
+
+export const registerSuiteFolder = (folder: string) =>
+  fetch('/api/suite/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder }),
+  }).then((r) => json<SuiteRegisterResult>(r))
+
+export const launchModel = (body: LaunchReq) =>
+  fetch('/api/engines/launch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) =>
+    json<{ id: string; port: number; engine: string; ngl: number; state: string }>(r),
+  )
+
+export const getSession = (tail = 60) =>
+  fetch(`/api/engines/session?tail=${tail}`).then((r) => json<SessionInfo>(r))
+
+export const stopSession = () =>
+  fetch('/api/engines/session/stop', { method: 'POST' }).then((r) =>
+    json<{ stopped: boolean; state: string }>(r),
+  )
+
+export interface SessionEvent {
+  type: 'launched' | 'log' | 'state'
+  id?: string
+  port?: number
+  engine?: string
+  ngl?: number
+  line?: string
+  state?: SessionState
+  error?: string | null
+  metrics?: SessionMetrics | null
+}
+
+// SSE de la sesión única activa. El backend cierra el stream en
+// failed/stopped; al lanzar una nueva sesión hay que re-susccribirse.
+export function openSessionEvents(
+  onEvent: (ev: SessionEvent) => void,
+): EventSource {
+  const es = new EventSource('/api/engines/session/events')
+  es.onmessage = (m) => {
+    try {
+      onEvent(JSON.parse(m.data))
+    } catch {
+      /* línea keepalive u otros */
+    }
+  }
+  return es
+}
+
 export interface JobEvent {
   type: 'start' | 'progress' | 'log' | 'file_done' | 'paused' | 'done' | 'error'
   path?: string
