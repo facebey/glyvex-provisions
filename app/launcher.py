@@ -26,6 +26,8 @@ import hashlib
 import json
 import os
 import queue
+import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -37,7 +39,7 @@ from pathlib import Path
 
 import httpx2
 
-from . import gguf, hardware, profiles, settings as st, suite
+from . import fit, gguf, hardware, profiles, settings as st, suite
 from .paths import DATA_DIR
 
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -49,7 +51,12 @@ OLLAMA_PORT = 11434
 OLLAMA_BASE = f"http://127.0.0.1:{OLLAMA_PORT}"
 
 ENGINES_FILE = DATA_DIR / "engines.json"
+PRESETS_FILE = DATA_DIR / "presets.json"
 OLLAMA_DIR = DATA_DIR / "ollama"
+
+# U16: escenarios de preset (cómo lanzar, no qué modelo)
+PRESET_SCENARIOS = ("chat", "vision", "offload")
+ENGINE_IDS = ("auto", "suite", "user", "ollama")
 
 # Estados de una sesión: starting -> verifying -> ready | failed -> stopped
 STATES = ("starting", "verifying", "ready", "failed", "stopped")
@@ -95,12 +102,165 @@ def save_engines(user_binary: str | None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# U16: presets de lanzamiento (data/presets.json — mismo patrón que engines)
+# Un preset describe CÓMO lanzar (engine, régimen, contexto, mmproj, args
+# extra), nunca qué modelo: la UI lo aplica rellenando el formulario y el
+# launch sigue siendo explícito.
+# ---------------------------------------------------------------------------
+
+
+def _presets_disk() -> list[dict]:
+    try:
+        raw = json.loads(PRESETS_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+    return [p for p in raw if isinstance(p, dict)] if isinstance(raw, list) else []
+
+
+def _write_presets(items: list[dict]) -> None:
+    PRESETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PRESETS_FILE.write_text(
+        json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _sanitize_preset(p: dict, preset_id: str | None = None) -> dict:
+    """Valida y normaliza un preset. `ValueError` -> 422 en la API."""
+    name = str(p.get("name") or "").strip()
+    if not name:
+        raise ValueError("falta el nombre del preset")
+    scenario = str(p.get("scenario") or "chat")
+    if scenario not in PRESET_SCENARIOS:
+        raise ValueError(
+            f"escenario inválido: {scenario} (usa chat, vision u offload)")
+    engine = str(p.get("engine") or "auto")
+    if engine not in ENGINE_IDS:
+        raise ValueError(f"engine inválido: {engine}")
+    regime = str(p.get("regime") or "gpu")
+    if regime not in fit.REGIMES:
+        raise ValueError(f"régimen inválido: {regime}")
+    if scenario == "offload":
+        regime = "offload"  # el escenario fija el régimen
+    mmproj = str(p.get("mmproj") or "").strip() or None
+    if scenario == "vision" and not mmproj:
+        raise ValueError(
+            "el escenario vision requiere mmproj (proyección de imagen)")
+    context = p.get("context") or st.DEFAULTS["context"]
+    try:
+        context = int(context)
+    except (TypeError, ValueError):
+        raise ValueError(f"contexto inválido: {context}")
+    if context not in st.CONTEXTS:
+        raise ValueError(f"contexto inválido: {context}")
+    port = p.get("port")
+    if port not in (None, ""):
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            raise ValueError(f"puerto inválido: {port}")
+        if not 1 <= port <= 65535:
+            raise ValueError(f"puerto fuera de rango: {port}")
+    return {
+        "id": preset_id or uuid.uuid4().hex[:8],
+        "name": name,
+        "scenario": scenario,
+        "engine": engine,
+        "profile_id": str(p.get("profile_id") or profiles.AUTO_ID),
+        "regime": regime,
+        "context": context,
+        "port": port,
+        "mmproj": mmproj,
+        "extra_args": str(p.get("extra_args") or "").strip(),
+    }
+
+
+def get_presets() -> list[dict]:
+    return _presets_disk()
+
+
+def create_preset(p: dict) -> dict:
+    item = _sanitize_preset(p)
+    items = _presets_disk()
+    if any(it.get("name") == item["name"] for it in items):
+        raise ValueError(f"ya existe un preset llamado {item['name']!r}")
+    items.append(item)
+    _write_presets(items)
+    return item
+
+
+def update_preset(preset_id: str, p: dict) -> dict:
+    items = _presets_disk()
+    idx = next((i for i, it in enumerate(items)
+                if it.get("id") == preset_id), None)
+    if idx is None:
+        raise KeyError(f"preset inexistente: {preset_id}")
+    item = _sanitize_preset({**items[idx], **p}, preset_id)
+    items[idx] = item
+    _write_presets(items)
+    return item
+
+
+def delete_preset(preset_id: str) -> None:
+    items = _presets_disk()
+    kept = [it for it in items if it.get("id") != preset_id]
+    if len(kept) == len(items):
+        raise KeyError(f"preset inexistente: {preset_id}")
+    _write_presets(kept)
+
+
+# ---------------------------------------------------------------------------
 # Detección de engines (cascada)
 # ---------------------------------------------------------------------------
 
 
+# U16: líneas de device de `llama-server --list-devices`.
+# b11827:  "  CUDA0: NVIDIA GeForce RTX 3090 (24575 MiB, 18826 MiB free)"
+# builds viejos: "  0: NVIDIA GeForce RTX 4070 (CUDA)"
+_DEV_NEW_RE = re.compile(
+    r"^\s*([A-Za-z]{2,10})(\d+):\s*(.+?)\s*\((\d+)\s*MiB"
+    r"(?:,\s*\d+\s*MiB free)?\)\s*$")
+_DEV_OLD_RE = re.compile(
+    r"^\s*(\d+):\s*(.+?)\s+\(([A-Za-z0-9_-]+)\)\s*$")
+
+
+def _list_devices(binary: str) -> list[dict]:
+    """Inventario de dispositivos del binario ([] si no soporta el flag:
+    builds viejos no rompen el probe)."""
+    try:
+        r = subprocess.run(
+            [binary, "--list-devices"], capture_output=True, text=True,
+            timeout=20, creationflags=NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    out = (r.stdout or "") + (r.stderr or "")
+    devices = []
+    for line in out.splitlines():
+        m = _DEV_NEW_RE.match(line)
+        if m:
+            devices.append({"index": int(m.group(2)),
+                            "name": m.group(3)[:80],
+                            "backend": m.group(1)})
+            continue
+        m = _DEV_OLD_RE.match(line)
+        if m:
+            devices.append({"index": int(m.group(1)),
+                            "name": m.group(2)[:80],
+                            "backend": m.group(3)})
+    return devices
+
+
+def _accel_of(devices: list[dict]) -> tuple[str | None, str | None]:
+    """(accel, advertencia): primer backend no-CPU; solo CPU -> advertencia."""
+    for d in devices:
+        if d["backend"] != "CPU":
+            return d["backend"], None
+    if devices:
+        return "CPU", "binario sin aceleración: solo CPU detectada"
+    return None, None  # el binario no expone --list-devices
+
+
 def probe_binary(path: str) -> dict:
     """Sondea un llama-server.exe: ¿existe? ¿version? ¿soporta --tensor-split?
+    ¿qué dispositivos ve? (U16: --list-devices -> CUDA/Vulkan/ROCm/SYCL/CPU).
 
     Patrón de la Suite (probe + nunca romper el launch): cualquier fallo
     deja ok=False con un detalle accionable.
@@ -108,7 +268,8 @@ def probe_binary(path: str) -> dict:
     p = Path(path)
     if not p.is_file():
         return {"path": path, "ok": False, "version": None,
-                "supports_ts": False, "detail": "el archivo no existe"}
+                "supports_ts": False, "detail": "el archivo no existe",
+                "devices": [], "accel": None, "accel_warning": None}
     version = None
     supports_ts = False
     try:
@@ -126,11 +287,16 @@ def probe_binary(path: str) -> dict:
         help_out = (h.stdout or "") + (h.stderr or "")
         supports_ts = ("--tensor-split" in help_out or "-ts " in help_out
                        or "\n-ts" in help_out)
+        devices = _list_devices(str(p))
+        accel, accel_warning = _accel_of(devices)
         return {"path": path, "ok": True, "version": version,
-                "supports_ts": supports_ts, "detail": None}
+                "supports_ts": supports_ts, "detail": None,
+                "devices": devices, "accel": accel,
+                "accel_warning": accel_warning}
     except (OSError, subprocess.SubprocessError) as e:
         return {"path": path, "ok": False, "version": None,
-                "supports_ts": False, "detail": str(e)[:200]}
+                "supports_ts": False, "detail": str(e)[:200],
+                "devices": [], "accel": None, "accel_warning": None}
 
 
 def _ollama_alive() -> dict | None:
@@ -170,6 +336,7 @@ def detect_engines() -> dict:
         "supports_ts": False,
         "detail": None if ol["running"] else
         "el daemon de Ollama no está corriendo en 127.0.0.1:11434",
+        "devices": [], "accel": None, "accel_warning": None,
     })
     available = [e["id"] for e in engines
                  if e["ok"] or (e["id"] == "ollama" and ol["running"])]
@@ -285,8 +452,12 @@ def _tensor_split(caps: dict) -> list[float] | None:
 
 
 def build_command(binary: str, model_path: Path, port: int, ngl: int,
-                  n_ctx: int, ts: list[float] | None) -> list[str]:
-    """Comando mínimo de verificación (ver docstring del módulo)."""
+                  n_ctx: int, ts: list[float] | None,
+                  mmproj: str | None = None,
+                  extra: list[str] | None = None) -> list[str]:
+    """Comando mínimo de verificación (ver docstring del módulo) + U16:
+    --mmproj (visión) y args extra free-form (se agregan al final, tal cual).
+    """
     cmd = [binary,
            "-m", str(model_path),
            "-c", str(n_ctx),
@@ -295,6 +466,10 @@ def build_command(binary: str, model_path: Path, port: int, ngl: int,
            "--port", str(port)]
     if ts:
         cmd += ["--tensor-split", ",".join(f"{v:g}" for v in ts)]
+    if mmproj:
+        cmd += ["--mmproj", mmproj]
+    if extra:
+        cmd += list(extra)
     return cmd
 
 
@@ -312,7 +487,9 @@ class Session:
 
     def __init__(self, model_path: Path, engine: dict, port: int,
                  n_ctx: int, ngl: int, regime: str, ngl_detail: str | None,
-                 ts: list[float] | None) -> None:
+                 ts: list[float] | None,
+                 mmproj: str | None = None,
+                 extra_args: str | None = None) -> None:
         self.id = f"{time.strftime('%y%m%d')}-{uuid.uuid4().hex[:6]}"
         self.model_path = str(model_path)
         self.engine = engine["id"]
@@ -325,6 +502,8 @@ class Session:
         self.ngl_detail = ngl_detail
         self.ts = ts
         self.regime = regime
+        self.mmproj = mmproj
+        self.extra_args = extra_args
         self.state = "starting"
         self.error: str | None = None
         self.metrics: dict | None = None
@@ -358,6 +537,7 @@ class Session:
             "engine_label": self.engine_label, "kind": self.kind,
             "port": self.port, "n_ctx": self.n_ctx, "ngl": self.ngl,
             "ngl_detail": self.ngl_detail, "ts": self.ts, "regime": self.regime,
+            "mmproj": self.mmproj, "extra_args": self.extra_args,
             "state": self.state, "error": self.error, "metrics": self.metrics,
             "ollama_model": self.ollama_model,
             "uptime_s": int(time.time() - self.started_at),
@@ -541,7 +721,9 @@ class Manager:
                 and self.current.state in ("starting", "verifying", "ready"))
 
     def launch(self, model_path: str, engine: str, profile_id: str,
-               regime: str, context: int, port: int | None) -> Session:
+               regime: str, context: int, port: int | None,
+               mmproj: str | None = None,
+               extra_args: str | None = None) -> Session:
         with self._lock:
             if self.busy():
                 raise BusyError("ya hay una sesión activa: detenéla antes "
@@ -550,6 +732,15 @@ class Manager:
             if not p.is_file():
                 raise ValueError(f"archivo inexistente: {p}")
             eng = _resolve_engine(engine)
+            mmproj = (mmproj or "").strip() or None
+            if mmproj:
+                if eng["kind"] == "ollama":
+                    raise ValueError(
+                        "Ollama no soporta mmproj externo (visión): elegí un "
+                        "engine llama (suite o binario propio)")
+                if not Path(mmproj).is_file():
+                    raise ValueError(f"mmproj inexistente: {mmproj}")
+            extra = shlex.split(extra_args) if (extra_args or "").strip() else []
             caps = profiles.caps_for(profile_id)
             if caps is None:
                 raise ValueError(f"perfil inexistente: {profile_id}")
@@ -560,11 +751,13 @@ class Manager:
                 ts = None
             port = _pick_port(port)
             s = Session(p, eng, port, context, ngl_info["ngl"], regime,
-                        ngl_info["detail"], ts)
+                        ngl_info["detail"], ts, mmproj,
+                        extra_args.strip() if (extra_args or "").strip() else None)
             self.current = s
 
             if eng["kind"] == "llama":
-                cmd = build_command(eng["path"], p, port, s.ngl, context, ts)
+                cmd = build_command(eng["path"], p, port, s.ngl, context, ts,
+                                    mmproj, extra)
                 s.log_line("[prov] $ " + " ".join(
                     '"' + c + '"' if " " in c else c for c in cmd))
                 s.process = subprocess.Popen(

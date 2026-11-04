@@ -587,6 +587,10 @@ button.mini.danger:hover:not(:disabled) {
 .launcher .eng.off .dot { background: var(--no); }
 .launcher .eng.off { opacity: 0.7; }
 
+/* U16: presets (chips con botones dentro: atenuación mínima, no 0.7) */
+.launcher .eng:has(> button) { opacity: 0.92; gap: 8px; }
+.launcher .eng:has(> button) button.chip { margin-left: 2px; }
+
 .launcher .session {
   margin-top: 12px;
   border: 1px solid var(--border);
