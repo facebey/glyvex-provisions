@@ -366,6 +366,12 @@ export const retryDownload = (jobId: string) =>
 // una vez (la carpeta queda bajo jurisdicción de la Suite).
 // ---------------------------------------------------------------------------
 
+export interface EngineDevice {
+  index: number
+  name: string
+  backend: string // CUDA | Vulkan | ROCm | SYCL | Metal | CPU …
+}
+
 export interface EngineInfo {
   id: string // 'suite' | 'user' | 'ollama'
   label: string
@@ -376,6 +382,10 @@ export interface EngineInfo {
   version: string | null
   supports_ts: boolean
   detail: string | null
+  // U16: inventario de --list-devices (ausente en builds viejos)
+  devices?: EngineDevice[]
+  accel?: string | null
+  accel_warning?: string | null
 }
 
 export interface EnginesData {
@@ -440,6 +450,8 @@ export interface SessionInfo {
   ngl_detail: string | null
   ts: number[] | null
   regime: string
+  mmproj?: string | null
+  extra_args?: string | null
   state: SessionState
   error: string | null
   metrics: SessionMetrics | null
@@ -455,7 +467,59 @@ export interface LaunchReq {
   regime: Regime
   context: number
   port?: number | null
+  mmproj?: string | null // U16: visión (solo engines llama)
+  extra_args?: string | null // U16: free-form, tal cual en el comando
 }
+
+// U16: presets de lanzamiento (cómo lanzar, no qué modelo)
+export type PresetScenario = 'chat' | 'vision' | 'offload'
+
+export interface Preset {
+  id: string
+  name: string
+  scenario: PresetScenario
+  engine: string
+  profile_id: string
+  regime: Regime
+  context: number
+  port: number | null
+  mmproj: string | null
+  extra_args: string
+}
+
+export interface PresetIn {
+  name: string
+  scenario?: PresetScenario
+  engine?: string
+  profile_id?: string
+  regime?: Regime
+  context?: number
+  port?: number | null
+  mmproj?: string | null
+  extra_args?: string
+}
+
+export const getPresets = () =>
+  fetch('/api/launcher/presets').then((r) => json<{ presets: Preset[] }>(r))
+
+export const createPreset = (body: PresetIn) =>
+  fetch('/api/launcher/presets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Preset>(r))
+
+export const updatePreset = (id: string, body: PresetIn) =>
+  fetch(`/api/launcher/presets/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then((r) => json<Preset>(r))
+
+export const deletePreset = (id: string) =>
+  fetch(`/api/launcher/presets/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }).then((r) => json<{ ok: boolean }>(r))
 
 export const getEngines = () =>
   fetch('/api/engines').then((r) => json<EnginesData>(r))

@@ -9,6 +9,9 @@ import {
   type LibraryData,
   type ModelHit,
   type Package,
+  type Preset,
+  type PresetIn,
+  type PresetScenario,
   type Profile,
   type ProfileGpu,
   type Regime,
@@ -22,7 +25,9 @@ import {
   addPackage,
   addProfile,
   addStorage,
+  createPreset,
   deletePackage,
+  deletePreset,
   deleteProfile,
   deleteStorage,
   downloadPackage,
@@ -31,6 +36,7 @@ import {
   getEngines,
   getHardware,
   getLibrary,
+  getPresets,
   getRepo,
   getSession,
   getSettings,
@@ -51,6 +57,7 @@ import {
   searchModels,
   stopSession,
   submitDownload,
+  updatePreset,
 } from './api'
 import {
   type UpdateInfo,
@@ -211,6 +218,16 @@ export default function App() {
   const [launchFile, setLaunchFile] = useState('') // .gguf dentro del modelo
   const [launchPath, setLaunchPath] = useState('') // ruta manual (prende si llena)
   const [launchEngine, setLaunchEngine] = useState('auto')
+  // U16: presets (cómo lanzar, no qué modelo) + visión + args avanzados
+  const [presets, setPresets] = useState<Preset[]>([])
+  const [presetEditId, setPresetEditId] = useState('') // '' = creando nuevo
+  const [presetName, setPresetName] = useState('')
+  const [presetScenario, setPresetScenario] =
+    useState<PresetScenario>('chat')
+  const [mmprojSel, setMmprojSel] = useState('') // '' | ruta archivo | 'manual'
+  const [mmprojManual, setMmprojManual] = useState('')
+  const [launchExtra, setLaunchExtra] = useState('')
+  const [launchPort, setLaunchPort] = useState('')
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [sessionLog, setSessionLog] = useState<string[]>([])
   const [suiteMsg, setSuiteMsg] = useState('')
@@ -453,6 +470,7 @@ export default function App() {
       })
       .catch(() => {})
     getSuiteStatus().then(setSuiteSt).catch(() => {})
+    getPresets().then((d) => setPresets(d.presets)).catch(() => {})
     getSession()
       .then((s) => {
         setSession(s)
@@ -499,6 +517,9 @@ export default function App() {
         profile_id: profileId,
         regime,
         context: parseInt(adjContext, 10) || 4096,
+        port: launchPort.trim() ? parseInt(launchPort, 10) || null : null,
+        mmproj: mmprojValue || null,
+        extra_args: launchExtra.trim() || null,
       })
       attachSessionEvents()
       getSession().then(setSession).catch(() => {})
@@ -521,6 +542,70 @@ export default function App() {
           setSessionLog(s.log_tail)
         })
         .catch(() => {})
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // U16: guardar el preset desde el formulario actual (launch sigue explícito)
+  const doSavePreset = async () => {
+    if (!presetName.trim()) {
+      setError('Poné un nombre para el preset.')
+      return
+    }
+    setBusy('preset')
+    setError(null)
+    const body: PresetIn = {
+      name: presetName.trim(),
+      scenario: presetScenario,
+      engine: launchEngine,
+      profile_id: profileId,
+      regime,
+      context: parseInt(adjContext, 10) || 4096,
+      port: launchPort.trim() ? parseInt(launchPort, 10) || null : null,
+      mmproj: mmprojValue || null,
+      extra_args: launchExtra.trim(),
+    }
+    try {
+      if (presetEditId) await updatePreset(presetEditId, body)
+      else await createPreset(body)
+      setPresetEditId('')
+      setPresetName('')
+      const d = await getPresets()
+      setPresets(d.presets)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // U16: aplicar preset = rellenar el formulario (no lanza nada)
+  const doApplyPreset = (p: Preset) => {
+    setLaunchEngine(p.engine)
+    setRegime(p.regime)
+    setAdjContext(String(p.context))
+    setLaunchPort(p.port ? String(p.port) : '')
+    setMmprojSel(p.mmproj || '')
+    setMmprojManual(p.mmproj || '')
+    setLaunchExtra(p.extra_args)
+    setPresetScenario(p.scenario)
+  }
+
+  const doDeletePreset = async (p: Preset) => {
+    if (!window.confirm(`¿Borrar el preset «${p.name}»?`)) return
+    setBusy('preset')
+    setError(null)
+    try {
+      await deletePreset(p.id)
+      if (presetEditId === p.id) {
+        setPresetEditId('')
+        setPresetName('')
+      }
+      const d = await getPresets()
+      setPresets(d.presets)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -830,6 +915,12 @@ export default function App() {
       !f.label.startsWith('mmproj') &&
       !f.label.startsWith('MTP'),
   )
+  // U16: visión — mmproj disponibles del modelo elegido (de la librería)
+  const mmprojFiles = (selectedModel?.files ?? []).filter(
+    (f) => f.label.toLowerCase().includes('mmproj'),
+  )
+  const mmprojValue =
+    mmprojSel === 'manual' ? mmprojManual.trim() : mmprojSel
 
   const toggle = (path: string) => {
     setSelected((s) => {
@@ -1705,7 +1796,7 @@ export default function App() {
           real (comando mínimo a propósito: si falla, la causa es «no cabe»,
           no un flag). Con Glyvex-AI-Suite abierta podés registrar la carpeta
           del modelo; sin ella, el server queda corriendo en su puerto
-          (servers R10). Opciones avanzadas y presets: en la Suite y en U16.
+          (servers R10). Opciones avanzadas y presets: acá y en la Suite (U16).
         </div>
 
         {/* Engines (cascada) */}
@@ -1717,11 +1808,14 @@ export default function App() {
             <span
               key={e.id}
               className={`eng ${e.ok ? 'on' : 'off'}`}
-              title={e.detail ?? e.path ?? e.version ?? e.id}
+              title={e.accel_warning ?? e.detail ?? e.path ?? e.version ?? e.id}
             >
               <span className="dot" />
               {e.label}
               {e.version ? ` · ${e.version}` : ''}
+              {/* U16: backend de aceleración (CUDA/Vulkan/ROCm/SYCL/CPU) */}
+              {e.accel ? ` · ${e.accel}` : ''}
+              {e.accel_warning ? ' ⚠' : ''}
             </span>
           ))}
           {engines && engines.engines.available.length === 0 && (
@@ -1746,6 +1840,88 @@ export default function App() {
           </button>
         </div>
 
+        {/* U16: presets (cómo lanzar, no qué modelo) */}
+        <div className="muted small" style={{ marginTop: 8 }}>
+          Presets de lanzamiento (engine, régimen, ctx, mmproj y args — el
+          modelo se elige abajo)
+        </div>
+        {presets.length > 0 && (
+          <div className="engines-list">
+            {presets.map((p) => (
+              <span
+                key={p.id}
+                className={`eng ${presetEditId === p.id ? 'on' : 'off'}`}
+                title={`ctx ${p.context} · ${p.engine} · ${p.regime}${
+                  p.port ? ` · puerto ${p.port}` : ''
+                }${p.mmproj ? ' · mmproj' : ''}${p.extra_args ? ` · ${p.extra_args}` : ''}`}
+              >
+                <span className="dot" />
+                {p.name}
+                <button className="chip tiny" onClick={() => doApplyPreset(p)}>
+                  Usar
+                </button>
+                <button
+                  className="chip tiny"
+                  onClick={() => {
+                    setPresetEditId(p.id)
+                    setPresetName(p.name)
+                    setPresetScenario(p.scenario)
+                  }}
+                >
+                  Editar
+                </button>
+                <button
+                  className="chip tiny"
+                  onClick={() => doDeletePreset(p)}
+                  title="Borrar"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="row addprofile">
+          <label className="dest" style={{ flex: 1 }}>
+            {presetEditId ? 'Editar preset (con el formulario actual):' : 'Nuevo preset (guarda el formulario actual):'}
+            <input
+              name="presetname"
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder="p. ej. Visión 8k GPU"
+            />
+          </label>
+          {(['chat', 'vision', 'offload'] as PresetScenario[]).map((sc) => (
+            <button
+              key={sc}
+              className={presetScenario === sc ? 'chip active' : 'chip'}
+              onClick={() => setPresetScenario(sc)}
+            >
+              {sc}
+            </button>
+          ))}
+          <button
+            onClick={doSavePreset}
+            disabled={busy === 'preset' || !presetName.trim()}
+          >
+            {presetEditId
+              ? 'Actualizar preset'
+              : busy === 'preset'
+                ? 'Guardando…'
+                : 'Guardar preset'}
+          </button>
+          {presetEditId && (
+            <button
+              onClick={() => {
+                setPresetEditId('')
+                setPresetName('')
+              }}
+            >
+              Cancelar
+            </button>
+          )}
+        </div>
+
         {/* Modelo + parámetros + acción */}
         <div className="row addprofile">
           <label className="dest">
@@ -1757,6 +1933,8 @@ export default function App() {
                 setLaunchModelDir(e.target.value)
                 setLaunchFile('')
                 setLaunchPath('')
+                setMmprojSel('')
+                setMmprojManual('')
               }}
             >
               <option value="">—</option>
@@ -1800,6 +1978,61 @@ export default function App() {
             </select>
           </label>
         </div>
+        {/* U16: visión + puerto + args avanzados (free-form) */}
+        <div className="row addprofile">
+          <label className="dest">
+            mmproj (visión):
+            <select
+              name="launchmmproj"
+              value={mmprojSel}
+              onChange={(e) => setMmprojSel(e.target.value)}
+            >
+              <option value="">— (sin mmproj)</option>
+              {mmprojFiles.map((f) => (
+                <option key={f.path} value={f.path}>
+                  {f.label}
+                </option>
+              ))}
+              <option value="manual">Ruta manual…</option>
+            </select>
+          </label>
+          <label className="dest">
+            Puerto (auto si vacío):
+            <input
+              name="launchport"
+              value={launchPort}
+              onChange={(e) => setLaunchPort(e.target.value)}
+              placeholder="8080"
+              style={{ width: 70 }}
+            />
+          </label>
+          {mmprojSel === 'manual' && (
+            <label className="dest" style={{ flex: 1 }}>
+              Ruta del mmproj:
+              <input
+                name="mmprojmanual"
+                className="st-path"
+                value={mmprojManual}
+                onChange={(e) => setMmprojManual(e.target.value)}
+                placeholder="G:\LLM\gguf\modelo\mmproj-BF16.gguf"
+              />
+            </label>
+          )}
+        </div>
+        <div className="row addprofile">
+          <label className="dest" style={{ flex: 1 }}>
+            Args extra (free-form, se agregan al comando tal cual):
+            <input
+              name="launchextra"
+              className="st-path mono"
+              value={launchExtra}
+              onChange={(e) => setLaunchExtra(e.target.value)}
+              placeholder="--flash-attn on --jinja"
+            />
+          </label>
+        </div>
+
+        {/* Modelo + parámetros + acción */}
         <div className="row addprofile">
           <label className="dest" style={{ flex: 1 }}>
             …o ruta manual (prevalece sobre la librería):
@@ -1827,6 +2060,25 @@ export default function App() {
           </button>
         </div>
 
+        {/* U16: preview del comando (extra_args se ve tal cual) */}
+        <div className="muted small mono" style={{ marginTop: 4, wordBreak: 'break-all' }}>
+          {launchEngine === 'ollama' ? (
+            <>
+              $ ollama create prov-&lt;hash&gt; — Modelfile: FROM &lt;modelo&gt; +
+              num_ctx {adjContext} (keep_alive -1)
+            </>
+          ) : (
+            <>
+              $ llama-server -m &lt;modelo&gt; -c {adjContext} -ngl{' '}
+              {regime === 'cpu' ? '0' : regime === 'offload' ? 'auto (VRAM)' : '999'}{' '}
+              --host 127.0.0.1 --port {launchPort.trim() || '8080+'}
+              {regime === 'multi' ? ' --tensor-split &lt;pesos por VRAM&gt;' : ''}
+              {mmprojValue ? ` --mmproj ${mmprojValue}` : ''}
+              {launchExtra.trim() ? ` ${launchExtra.trim()}` : ''}
+            </>
+          )}
+        </div>
+
         {/* Sesión activa */}
         {session && (
           <div className="session">
@@ -1840,6 +2092,8 @@ export default function App() {
               <span>puerto {session.port}</span>
               <span>ctx {session.n_ctx}</span>
               <span>-ngl {session.ngl}</span>
+              {session.mmproj && <span>visión (mmproj)</span>}
+              {session.extra_args && <span title={session.extra_args}>args extra</span>}
               {session.uptime_s > 0 && <span>{session.uptime_s} s</span>}
             </div>
             {session.ngl_detail && (
