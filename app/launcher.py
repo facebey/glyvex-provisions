@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import shlex
 import shutil
 import socket
@@ -211,8 +212,55 @@ def delete_preset(preset_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+# U16: líneas de device de `llama-server --list-devices`.
+# b11827:  "  CUDA0: NVIDIA GeForce RTX 3090 (24575 MiB, 18826 MiB free)"
+# builds viejos: "  0: NVIDIA GeForce RTX 4070 (CUDA)"
+_DEV_NEW_RE = re.compile(
+    r"^\s*([A-Za-z]{2,10})(\d+):\s*(.+?)\s*\((\d+)\s*MiB"
+    r"(?:,\s*\d+\s*MiB free)?\)\s*$")
+_DEV_OLD_RE = re.compile(
+    r"^\s*(\d+):\s*(.+?)\s+\(([A-Za-z0-9_-]+)\)\s*$")
+
+
+def _list_devices(binary: str) -> list[dict]:
+    """Inventario de dispositivos del binario ([] si no soporta el flag:
+    builds viejos no rompen el probe)."""
+    try:
+        r = subprocess.run(
+            [binary, "--list-devices"], capture_output=True, text=True,
+            timeout=20, creationflags=NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    out = (r.stdout or "") + (r.stderr or "")
+    devices = []
+    for line in out.splitlines():
+        m = _DEV_NEW_RE.match(line)
+        if m:
+            devices.append({"index": int(m.group(2)),
+                            "name": m.group(3)[:80],
+                            "backend": m.group(1)})
+            continue
+        m = _DEV_OLD_RE.match(line)
+        if m:
+            devices.append({"index": int(m.group(1)),
+                            "name": m.group(2)[:80],
+                            "backend": m.group(3)})
+    return devices
+
+
+def _accel_of(devices: list[dict]) -> tuple[str | None, str | None]:
+    """(accel, advertencia): primer backend no-CPU; solo CPU -> advertencia."""
+    for d in devices:
+        if d["backend"] != "CPU":
+            return d["backend"], None
+    if devices:
+        return "CPU", "binario sin aceleración: solo CPU detectada"
+    return None, None  # el binario no expone --list-devices
+
+
 def probe_binary(path: str) -> dict:
     """Sondea un llama-server.exe: ¿existe? ¿version? ¿soporta --tensor-split?
+    ¿qué dispositivos ve? (U16: --list-devices -> CUDA/Vulkan/ROCm/SYCL/CPU).
 
     Patrón de la Suite (probe + nunca romper el launch): cualquier fallo
     deja ok=False con un detalle accionable.
@@ -220,7 +268,8 @@ def probe_binary(path: str) -> dict:
     p = Path(path)
     if not p.is_file():
         return {"path": path, "ok": False, "version": None,
-                "supports_ts": False, "detail": "el archivo no existe"}
+                "supports_ts": False, "detail": "el archivo no existe",
+                "devices": [], "accel": None, "accel_warning": None}
     version = None
     supports_ts = False
     try:
@@ -238,11 +287,16 @@ def probe_binary(path: str) -> dict:
         help_out = (h.stdout or "") + (h.stderr or "")
         supports_ts = ("--tensor-split" in help_out or "-ts " in help_out
                        or "\n-ts" in help_out)
+        devices = _list_devices(str(p))
+        accel, accel_warning = _accel_of(devices)
         return {"path": path, "ok": True, "version": version,
-                "supports_ts": supports_ts, "detail": None}
+                "supports_ts": supports_ts, "detail": None,
+                "devices": devices, "accel": accel,
+                "accel_warning": accel_warning}
     except (OSError, subprocess.SubprocessError) as e:
         return {"path": path, "ok": False, "version": None,
-                "supports_ts": False, "detail": str(e)[:200]}
+                "supports_ts": False, "detail": str(e)[:200],
+                "devices": [], "accel": None, "accel_warning": None}
 
 
 def _ollama_alive() -> dict | None:
@@ -282,6 +336,7 @@ def detect_engines() -> dict:
         "supports_ts": False,
         "detail": None if ol["running"] else
         "el daemon de Ollama no está corriendo en 127.0.0.1:11434",
+        "devices": [], "accel": None, "accel_warning": None,
     })
     available = [e["id"] for e in engines
                  if e["ok"] or (e["id"] == "ollama" and ol["running"])]
