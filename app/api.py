@@ -418,6 +418,8 @@ class LaunchReq(BaseModel):
     regime: str = "gpu"           # fit.REGIMES
     context: int = st.DEFAULTS["context"]
     port: int | None = None
+    mmproj: str | None = None     # U16: visión (solo engines llama)
+    extra_args: str | None = None  # U16: free-form, tal cual en el comando
 
 
 @router.get("/engines")
@@ -512,7 +514,8 @@ def launch_session(body: LaunchReq) -> dict:
     try:
         s = launcher.manager.launch(
             body.model_path, body.engine, body.profile_id,
-            body.regime, body.context, body.port)
+            body.regime, body.context, body.port,
+            body.mmproj, body.extra_args)
     except launcher.BusyError as e:
         raise HTTPException(409, str(e))
     except launcher.PortBusyError as e:

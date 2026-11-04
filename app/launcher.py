@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import queue
+import shlex
 import shutil
 import socket
 import subprocess
@@ -396,8 +397,12 @@ def _tensor_split(caps: dict) -> list[float] | None:
 
 
 def build_command(binary: str, model_path: Path, port: int, ngl: int,
-                  n_ctx: int, ts: list[float] | None) -> list[str]:
-    """Comando mínimo de verificación (ver docstring del módulo)."""
+                  n_ctx: int, ts: list[float] | None,
+                  mmproj: str | None = None,
+                  extra: list[str] | None = None) -> list[str]:
+    """Comando mínimo de verificación (ver docstring del módulo) + U16:
+    --mmproj (visión) y args extra free-form (se agregan al final, tal cual).
+    """
     cmd = [binary,
            "-m", str(model_path),
            "-c", str(n_ctx),
@@ -406,6 +411,10 @@ def build_command(binary: str, model_path: Path, port: int, ngl: int,
            "--port", str(port)]
     if ts:
         cmd += ["--tensor-split", ",".join(f"{v:g}" for v in ts)]
+    if mmproj:
+        cmd += ["--mmproj", mmproj]
+    if extra:
+        cmd += list(extra)
     return cmd
 
 
@@ -423,7 +432,9 @@ class Session:
 
     def __init__(self, model_path: Path, engine: dict, port: int,
                  n_ctx: int, ngl: int, regime: str, ngl_detail: str | None,
-                 ts: list[float] | None) -> None:
+                 ts: list[float] | None,
+                 mmproj: str | None = None,
+                 extra_args: str | None = None) -> None:
         self.id = f"{time.strftime('%y%m%d')}-{uuid.uuid4().hex[:6]}"
         self.model_path = str(model_path)
         self.engine = engine["id"]
@@ -436,6 +447,8 @@ class Session:
         self.ngl_detail = ngl_detail
         self.ts = ts
         self.regime = regime
+        self.mmproj = mmproj
+        self.extra_args = extra_args
         self.state = "starting"
         self.error: str | None = None
         self.metrics: dict | None = None
@@ -469,6 +482,7 @@ class Session:
             "engine_label": self.engine_label, "kind": self.kind,
             "port": self.port, "n_ctx": self.n_ctx, "ngl": self.ngl,
             "ngl_detail": self.ngl_detail, "ts": self.ts, "regime": self.regime,
+            "mmproj": self.mmproj, "extra_args": self.extra_args,
             "state": self.state, "error": self.error, "metrics": self.metrics,
             "ollama_model": self.ollama_model,
             "uptime_s": int(time.time() - self.started_at),
@@ -652,7 +666,9 @@ class Manager:
                 and self.current.state in ("starting", "verifying", "ready"))
 
     def launch(self, model_path: str, engine: str, profile_id: str,
-               regime: str, context: int, port: int | None) -> Session:
+               regime: str, context: int, port: int | None,
+               mmproj: str | None = None,
+               extra_args: str | None = None) -> Session:
         with self._lock:
             if self.busy():
                 raise BusyError("ya hay una sesión activa: detenéla antes "
@@ -661,6 +677,15 @@ class Manager:
             if not p.is_file():
                 raise ValueError(f"archivo inexistente: {p}")
             eng = _resolve_engine(engine)
+            mmproj = (mmproj or "").strip() or None
+            if mmproj:
+                if eng["kind"] == "ollama":
+                    raise ValueError(
+                        "Ollama no soporta mmproj externo (visión): elegí un "
+                        "engine llama (suite o binario propio)")
+                if not Path(mmproj).is_file():
+                    raise ValueError(f"mmproj inexistente: {mmproj}")
+            extra = shlex.split(extra_args) if (extra_args or "").strip() else []
             caps = profiles.caps_for(profile_id)
             if caps is None:
                 raise ValueError(f"perfil inexistente: {profile_id}")
@@ -671,11 +696,13 @@ class Manager:
                 ts = None
             port = _pick_port(port)
             s = Session(p, eng, port, context, ngl_info["ngl"], regime,
-                        ngl_info["detail"], ts)
+                        ngl_info["detail"], ts, mmproj,
+                        extra_args.strip() if (extra_args or "").strip() else None)
             self.current = s
 
             if eng["kind"] == "llama":
-                cmd = build_command(eng["path"], p, port, s.ngl, context, ts)
+                cmd = build_command(eng["path"], p, port, s.ngl, context, ts,
+                                    mmproj, extra)
                 s.log_line("[prov] $ " + " ".join(
                     '"' + c + '"' if " " in c else c for c in cmd))
                 s.process = subprocess.Popen(
