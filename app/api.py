@@ -52,6 +52,15 @@ def _file_label(path: str) -> str:
     return m.group(1).upper() if m else "(sin etiqueta)"
 
 
+def _is_main_gguf(path: str) -> bool:
+    """True para el GGUF del CUERPO PRINCIPAL: ni mmproj (visor de visión)
+    ni MTP (módulo multi-token-predicción). El MTP importa aparte: su
+    cabecera NO son los hparams del cuerpo (cachearla contamina la meta del
+    repo) y no hereda la KV del principal (va por v1, peso x margen)."""
+    base = path.rsplit("/", 1)[-1]
+    return not (MMPROJ_RE.search(base) or MTP_RE.search(base))
+
+
 def _aux_label(path: str, ext: str, size: int) -> str:
     """Etiqueta de archivos no-peso (model card, config, otros).
     Mismas categorías que el core (README, soporte <=1 MB, resto)."""
@@ -255,19 +264,21 @@ def repo_files(repo_id: str, regime: str = "gpu", profile: str = "local") -> dic
     limits = st.limits()
     context = st.get_settings()["context"]
     # v2: la cabecera GGUF se sondea UNA vez por repo (los quant comparten
-    # hparams). Los mmproj (visor, arquitectura clip/mt5) y no-GGUF van por
-    # v1: la KV de atención del LLM no les aplica.
-    gg_paths = [f["path"] for f in data["files"] if f["ext"] == ".gguf"
-                and not MMPROJ_RE.search(f["path"].rsplit("/", 1)[-1])]
+    # hparams). Los mmproj (visor, arquitectura clip/mt5), los MTP (módulo
+    # opcional: su cabecera no son los hparams del cuerpo) y los no-GGUF van
+    # por v1: la KV de atención del LLM no les aplica.
+    gg_paths = [f["path"] for f in data["files"]
+                if f["ext"] == ".gguf" and _is_main_gguf(f["path"])]
     gg_meta = gguf.repo_gguf_meta(repo_id, gg_paths) if gg_paths else None
     rows = []
     aux = []
     for f in data["files"]:
         if f["ext"] in WEIGHT_EXTS:
-            # Los mmproj (visor clip/mt5) van por v1 aunque el repo tenga meta:
-            # la KV de atención del LLM no les aplica.
+            # mmproj (visor clip/mt5) y MTP van por v1 aunque el repo tenga
+            # meta: la KV de atención del LLM no les aplica (el MTP ni la
+            # hereda: es un módulo opcional, peso x margen).
             if (f["ext"] == ".gguf" and gg_meta is not None
-                    and not MMPROJ_RE.search(f["path"].rsplit("/", 1)[-1])):
+                    and _is_main_gguf(f["path"])):
                 est = fit.estimate_v2(f["size"], regime, hw, limits,
                                       gg_meta, context)
             else:
