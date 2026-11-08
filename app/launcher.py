@@ -19,6 +19,10 @@ Verificación (mini-benchmark, lo justo para "cabe y responde"):
             (TTFB + tok/s) -> snapshot de VRAM
   ollama -> Modelfile (FROM + num_ctx) + `ollama create` -> /api/chat
             (eval_count/eval_duration, keep_alive -1); stop -> `ollama stop`
+
+U23 (fix de arranque 2026-11-07): `httpx2` se importa DIFERIDO, dentro de
+las funciones que hacen HTTP: solo hace falta al lanzar/verificar un modelo,
+no al arrancar el sidecar (Python lo cachea en sys.modules).
 """
 from __future__ import annotations
 
@@ -36,8 +40,6 @@ import time
 import uuid
 from collections import deque
 from pathlib import Path
-
-import httpx2
 
 from . import fit, gguf, hardware, profiles, settings as st, suite
 from .paths import DATA_DIR
@@ -300,6 +302,7 @@ def probe_binary(path: str) -> dict:
 
 
 def _ollama_alive() -> dict | None:
+    import httpx2  # U23: diferido
     try:
         r = httpx2.get(f"{OLLAMA_BASE}/api/version", timeout=2.0)
         if r.status_code == 200:
@@ -560,6 +563,7 @@ def _vram_snapshot() -> list[dict]:
 
 def _chat_probe(base: str, model_id: str) -> dict:
     """Mini-benchmark vía chat completions streaming: TTFB + tok/s."""
+    import httpx2  # U23: diferido
     payload = {
         "model": model_id,
         "messages": [{"role": "user",
@@ -600,6 +604,7 @@ def _chat_probe(base: str, model_id: str) -> dict:
 
 
 def _verify_llama(s: Session) -> None:
+    import httpx2  # U23: diferido
     base = f"http://127.0.0.1:{s.port}"
     deadline = time.time() + HEALTH_TIMEOUT_S
     try:
@@ -653,6 +658,7 @@ def _ollama_model_name(model_path: Path) -> str:
 
 
 def _verify_ollama(s: Session) -> None:
+    import httpx2  # U23: diferido
     name = _ollama_model_name(Path(s.model_path))
     s.ollama_model = name
     try:

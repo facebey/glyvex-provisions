@@ -3,17 +3,15 @@
 Única red saliente de la APP: huggingface.co (requisito R8).
 Token (R7): huggingface_hub resuelve solo el env HF_TOKEN o el cache de
 `hf auth login`. Nunca se persiste ni se expone en el proyecto.
+
+U23 (fix de arranque 2026-11-07): `huggingface_hub` y el core `hf_down` se
+importan DIFERIDO, dentro de las funciones que los usan: son el import más
+pesado del sidecar y solo se necesitan al buscar/listar, no al arrancar.
+Python los cachea en sys.modules, así que el coste es el de la 1.ª llamada.
 """
 from __future__ import annotations
 
 import re
-
-from huggingface_hub import HfApi, get_token
-from huggingface_hub.utils import HfHubHTTPError
-
-from hf_down import FileEntry, group_files
-
-API = HfApi()
 
 # Query que es un id de repo exacto (o URL pegada del navegador):
 # "author/name", "org/sub/name" o "https://huggingface.co/author/name?flag".
@@ -32,6 +30,7 @@ class GatedError(Exception):
 
 def has_token() -> bool:
     """True si hay token visible (HF_TOKEN del proceso o cache `hf auth login`)."""
+    from huggingface_hub import get_token  # U23: diferido
     return bool(get_token())
 
 
@@ -97,6 +96,11 @@ def search_models(query: str, limit: int = 20) -> list[dict]:
     daba "Sin resultados" aunque el repo existiera. Como respaldo se busca
     tambien por el nombre sin autor.
     """
+    # U23: diferido — huggingface_hub es el import pesado del sidecar.
+    from huggingface_hub import HfApi
+    from huggingface_hub.utils import HfHubHTTPError
+    api = HfApi()
+
     rid = _parse_repo_id(query)
     out: list[dict] = []
     seen: set[str] = set()
@@ -114,7 +118,7 @@ def search_models(query: str, limit: int = 20) -> list[dict]:
     text = query
     if rid is not None:
         try:
-            info = API.model_info(rid)
+            info = api.model_info(rid)
             add(info.modelId, getattr(info, "likes", None),
                 getattr(info, "downloads", None), info.pipeline_tag)
         except HfHubHTTPError as e:
@@ -125,7 +129,7 @@ def search_models(query: str, limit: int = 20) -> list[dict]:
                 raise
         text = rid.rsplit("/", 1)[-1]
 
-    for m in API.list_models(search=text, filter="gguf",
+    for m in api.list_models(search=text, filter="gguf",
                              sort="downloads", limit=limit):
         add(m.id, getattr(m, "likes", None), getattr(m, "downloads", None),
             getattr(m, "pipeline_tag", None))
@@ -139,8 +143,13 @@ def repo_files(repo_id: str) -> dict:
     .size; una carpeta listada como archivo se intentaba descargar y el
     resolve URL dava 404 "Entry not found" (p.ej. images/ en un repo).
     """
+    # U23: diferido — solo al listar (huggingface_hub + core hf_down).
+    from huggingface_hub import HfApi
+    from huggingface_hub.utils import HfHubHTTPError
+    from hf_down import FileEntry, group_files
+
     try:
-        items = API.list_repo_tree(repo_id, repo_type="model", recursive=True)
+        items = HfApi().list_repo_tree(repo_id, repo_type="model", recursive=True)
         files = [FileEntry(i.path, getattr(i, "size", 0) or 0) for i in items
                  if hasattr(i, "size")]  # RepoFile siempre trae .size
     except HfHubHTTPError as e:

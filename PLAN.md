@@ -168,6 +168,42 @@ Orden elegido: U12 desbloquea U13 (el updater necesita repo público); U14 es in
 - **Dependabot**: alertas 2–4 (paquete `zip`, 3×) en `fixed`; alerta 1 (`glib` 0.18.5 en `Cargo.lock`, GHSA-wrw7-89jp-8q8g) **dismissed 2026-11-04 como `NOT_USED`** (GO de Fabian, vía GraphQL `dismissRepositoryVulnerabilityAlert`): dependencia exclusiva de Linux (stack GTK vía tao/wry, no presente en el build Windows); el parche (0.20.0) exige subir el stack gtk/gio/gobject que tao/wry fijan a 0.18 → solo resoluble con una actualización mayor de Tauri/tao (revisar la alerta al actualizar).
 - **Merge**: `--no-ff` a `main` (merge `de876f1`) + push. **Borrado de ramas 2026-11-04** (GO de Fabian): eliminadas local `feature/u15-lanzador-modelos`, `feature/u16-presets-multigpu`, `fix/kv-gemma4-head-count-kv-array`, `fix/mtp-v1-no-parent-kv`, `release/v0.2.0` + remota `origin/release/v0.2.0` (verificadas mergueadas con `git branch --merged main` antes de borrar); queda **solo `main`** local y remota. Mapa del workspace (`D:\Proyectos\AGENTS.md`) actualizado a "Fase 3 cerrada / release v0.2.0 / remote público".
 
+### Fix de performance de arranque (abierto 2026-11-07)
+
+**Reporte de Fabian (2026-11-07)**: "inicia muy lenta la app" — doble-clic a UI usable medido en vivo ≈ **22–24 s** (la PC ya estaba sanada del incidente de hardware, así que no era el hardware). Diagnóstico por timeline medido (3 corridas, `Get-NetTCPConnection` por proceso + `Get-CimInstance` por parent pid):
+
+| Fase | Tiempo (medido) | Veredicto |
+|---|---|---|
+| Doble-clic → ventana + WebView2 + splash | ~1 s | ✅ Bien (hijo `msedgewebview2` aparece a los ~1 s) |
+| **Sonda del ladder 8321→8330 SECUENCIAL** (`find_existing_backend`, ureq timeout 2 s, ANTES del spawn) | **~20 s** | ❌ **Culpa del código** (10 sondeos uno detrás de otro; CPU de la app al 0%, bloqueada en conect) |
+| Sidecar → `/api/healthz` | 1.1–1.6 s | ✅ Bien (medido directo: 1966 ms frío / 1597 ms calido) |
+| Poll del spawn (`thread::sleep(1 s)`) + redirect | ≤1 s | ⚠️ Ajustable |
+
+**Anomalía de la PC (amplifica el bug; probable residuo del incidente de hardware)**: un SYN a un puerto **cerrado** de `127.0.0.1` tarda **~2.0 s** en fallar (medido raw con `TcpClient`: 2004–2073 ms; debería ser <10 ms) — el RST inmediato no llega y el stack espera la retransmisión. Windows Defender sin bloqueos (solo AV, estado correcto), 7 discos Healthy. En una PC sana cada sonda cuesta <10 ms y el arranque sería ~3–4 s.
+
+**No son cuello de botella** (verificado): bundle React (269 KB JS + 8 KB CSS), scan de hardware (nvidia-smi 130 ms), spawn del sidecar. El `192.168.50.171→4.228.31.150:443` post-healthz es el updater check esperado (GitHub), no parte del arranque.
+
+| U | Unidad | Estado |
+|---|---|---|
+| 19 | **Sonda del ladder en PARALELO** (`find_existing_backend` en `web/src-tauri/src/lib.rs`: un hilo por puerto, mpsc; si varios backends sanos reportan gana el puerto MÁS BAJO — mismo resultado determinista que la versión secuencial, pero cuesta 1 sonda en vez de 10) | ✅ Implementado y verado en vivo 2026-11-07 (rama `fix/arranque-ladder-paralelo`) |
+| 20 | Poll del spawn de 1 s → **250 ms tras el marker** (`spawn_and_wait`: con `marker_port` en mano el backend está casi arriba → poll fino; sin marker sigue a 1 s) | ✅ Implementado y verado en vivo 2026-11-07 (misma rama) |
+| 21 | **Reparar el stack TCP de la PC**: `netsh winsock reset` + `netsh int tcp reset` + reboot + re-medición (máquina, sin código; elimina la anomalía del SYN lento a nivel sistema) | ⏳ Pendiente decisión/timing de Fabian (requiere reboot) |
+| 22 | **Splash con ETAPAS** en vez de barra genérica (percepción): Rust emite `starting` (inicio del ciclo), `spawning` (antes de lanzar el sidecar) y `listening` (1.ª vez que llega el marker `#PORT_ASSIGNED#`) vía `emit_state`; `tauri.ts` las mapea a textos ("Iniciando el backend local…" / "Arrancando el servicio local…" / "Servicio listo — conectando…" / "Listo" / "El backend no arrancó. Reintentando…"). La webview puede llegar tarde a `starting` (el texto inicial del splash es equivalente; no se pierde nada) | ✅ Implementado y verado en vivo 2026-11-08 (misma rama; opción C de Fabian: U22+U23 van a la rama ANTES del merge a main) |
+| 23 | **Import DIFERIDO de todo lo que arrastra `huggingface_hub`/`httpx2`/los cores** de la cadena de arranque (no solo huggingface_hub): `hfsearch.py` (sin `API` global; `has_token`/`search_models`/`repo_files` con imports locales), `downloads.py` (`submit`/`_run`/`_expand_patterns`), `api.py` (constantes de `hf_down` por función), `storage.py` (`_weight_label`/`scan_library`), `gguf.py` (`resumable.prefetch_head` en `repo_gguf_meta`), `launcher.py` y `suite.py` (`httpx2` por función). Python cachea en sys.modules → el coste es el de la 1.ª llamada. `catalog.json` (17 KB, `lru_cache`) no pesa: no se tocó. `import app.main` venv: **8 452 → 976 ms (−88%)**; al arrancar NO carga ninguna de las cadenas pesadas (verificado con `sys.modules`) | ✅ Implementado y verado en vivo 2026-11-08 (misma rama) |
+
+**Verificación en vivo (2026-11-07, build release incremental desde la rama; `cargo check` + `cargo build --release` verdes; sidecar/resources intactos del build 0.2.0)**:
+
+| Corrida | Tauri→spawn | Tauri→healthz |
+|---|---|---|
+| Baseline 0.2.0 instalado (fría) | 21 539 ms | 22 698 ms |
+| Baseline 0.2.0 instalado (2.ª) | 21 424 ms | 22 625 ms |
+| Tras U19+U20 (1.ª, cache fría) | 3 568 ms | 7 390 ms |
+| Tras U19+U20 (2.ª, calida) | 3 444 ms | 4 577 ms |
+| **Tras U19+U20+U22+U23 (fría, sidecar congelado re-hecho)** | 3 100 ms | 7 042 ms |
+| **Tras U19+U20+U22+U23 (calida)** | **2 913 ms** | **4 026 ms** |
+
+**Meta <5 s en esta PC CUMPLIDA y reforzada (−82% sobre baseline: 22,7 s → 4,0 s calida)**. El ~2.9 s de sonda restante se va con U21 al reparar el stack TCP (la sonda paralela entonces es <10 ms). En una PC sana el arranque estimado ≈ 2,5–3 s. Verificación 2026-11-08: `npm run build` (tauri.ts con etapas) + `cargo check` + `cargo build --release` verdes; sidecar re-congelado con PyInstaller (`provisions.spec`, sin cambios — `collect_submodules` sigue recolectando los módulos aunque sean lazy) y re-copiado a `target/release/resources/provisions-backend` (carpeta REAL, no junction: hay que re-copiar el contenido tras cada rebuild del sidecar).
+
 ## 7. Decisiones
 
 1. **Stack**: ✅ **A — FastAPI + React (Vite + TypeScript)** (elegido por Fabian, 2026-10-24).

@@ -36,12 +36,14 @@ campos el resultado es idéntico al modelo denso:
   kv/token = capas x heads_kv x (dim_K + dim_V) x 2 bytes, dims
   explícitos via attention.key_length/value_length si existen; si no,
   head_dim = embedding_length / head_count. Sin campos mínimos: None.
+
+U23 (fix de arranque 2026-11-07): `resumable` (que a su vez importa
+huggingface_hub + httpx2) se carga DIFERIDO en `repo_gguf_meta`: solo hace
+falta al sondear una cabecera GGUF, no al arrancar el sidecar.
 """
 from __future__ import annotations
 
 import struct
-
-from resumable import prefetch_head
 
 PROBE_CAP = 1024 * 1024  # el bloque de hparams termina ~1 KB; 1 MB sobra
 KV_DTYPE_BYTES = 2       # cache F16, default de llama.cpp (k_cache_type)
@@ -85,6 +87,9 @@ def repo_gguf_meta(repo_id: str, weight_paths: list[str]) -> dict | None:
     """
     if repo_id in _META_CACHE:
         return _META_CACHE[repo_id]
+    # U23: diferido — el core resumable (huggingface_hub + httpx2) solo se
+    # carga al sondear la cabecera, no al arrancar el sidecar.
+    from resumable import prefetch_head
     meta: dict | None = None
     for p in weight_paths:
         head = prefetch_head(repo_id, p, PROBE_CAP)

@@ -2,7 +2,10 @@
 //!
 //! Ciclo de vida del sidecar (adaptado de `src-tauri/src/lib.rs` de la Suite):
 //! 1. Si ya hay un backend asentado en la escalera 8321..8330 (flujo dev con
-//!    `start.ps1`) se REUTILIZA: no se duplica el proceso.
+//!    `start.ps1`) se REUTILIZA: no se duplica el proceso. La sonda de la
+//!    escalera es PARALELA (U19, un hilo por puerto): su costo es 1 sonda, no
+//!    10 — con un stack TCP de loopback dañado la versión secuencial tardaba
+//!    ~20 s antes de llegar al step 2.
 //! 2. Si no, lo spawn-ea: en dev con el python del `.venv` (`-m app.main`,
 //!    cwd = raíz del repo); en producción con el sidecar PyInstaller empaquetado
 //!    como resource (`provisions-backend/provisions-backend.exe`).
@@ -13,6 +16,10 @@
 //!    3 intentos de spawn.
 //! 5. Emite `sidecar-state {state, url, port}` con heartbeat cada 5 s (la
 //!    webview puede cargar tarde) hasta que el sidecar muere → reintento.
+//!    U22: además emite las ETAPAS del arranque (`starting` → `spawning` →
+//!    `listening`) para que el splash muestre el progreso real, no solo una
+//!    barra genérica (la webview puede llegar tarde a `starting`; el texto
+//!    inicial del splash es equivalente).
 //! 6. En `RunEvent::Exit` mata al sidecar propio (los reutilizados del flujo
 //!    dev se dejan vivos, que es lo que hizo el usuario con start.ps1).
 //!
@@ -67,8 +74,34 @@ fn health_ok(port: u16) -> bool {
     matches!(ureq::get(&url).timeout(Duration::from_secs(2)).call(), Ok(r) if r.status() == 200)
 }
 
+/// U19: sonda del ladder en PARALELO — un hilo por puerto, así la sonda de
+/// reutilización cuesta 1 sonda (la más lenta) y no 10. En una PC sana cada
+/// sonda es <10 ms, pero con el stack TCP de loopback dañado (un SYN a un
+/// puerto cerrado que no recibe RST hasta la retransmisión, ~2 s) la versión
+/// secuencial antigua (`.find`) costaba 10 × 2 s = 20 s de splash antes de
+/// spawnear el sidecar propio (medido 2026-11-07 en la PC de Fabian, tras el
+/// incidente de hardware). Determinista como la vieja: si varios backends
+/// sanos reportan, gana el puerto MÁS BAJO.
 fn find_existing_backend() -> Option<u16> {
-    (BASE_PORT..BASE_PORT + LADDER).find(|p| health_ok(*p))
+    let (tx, rx) = mpsc::channel::<u16>();
+    let mut probes = Vec::with_capacity(LADDER as usize);
+    for port in BASE_PORT..BASE_PORT + LADDER {
+        let tx = tx.clone();
+        probes.push(thread::spawn(move || {
+            if health_ok(port) {
+                let _ = tx.send(port);
+            }
+        }));
+    }
+    drop(tx); // los hilos ya tienen su clone
+    for probe in probes {
+        let _ = probe.join();
+    }
+    let mut healthy: Option<u16> = None;
+    while let Ok(port) = rx.try_recv() {
+        healthy = Some(healthy.map_or(port, |h| h.min(port)));
+    }
+    healthy
 }
 
 /// Mismo contrato que la Suite: línea exacta `#PORT_ASSIGNED:<puerto>#`.
@@ -216,9 +249,16 @@ fn spawn_and_wait(app: &AppHandle) -> Option<u16> {
 
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut marker_port: Option<u16> = None;
+    let mut marker_announced = false;
     while Instant::now() < deadline {
         if let Ok(Some(p)) = rx.try_recv() {
             marker_port = Some(p);
+            // U22: el backend ya está arriba (marcó su puerto): etapa final
+            // del splash ("conectando…"); el healthz real llega en <1 s.
+            if !marker_announced {
+                marker_announced = true;
+                emit_state(app, "listening", p);
+            }
         }
         // Con marker usamos ese puerto; sin él (o antes de que llegue), la
         // escalera: el backend ya está bound en alguno de los vecinos.
@@ -232,7 +272,16 @@ fn spawn_and_wait(app: &AppHandle) -> Option<u16> {
         if child.try_wait().ok().flatten().is_some() {
             break; // murió antes de subir
         }
-        thread::sleep(Duration::from_secs(1));
+        // U20: con el marker en mano el backend está (casi) arriba — poll fino
+        // (250 ms) en vez de 1 s, recortando la latencia entre el healthz OK y
+        // el redirect de la webview; sin marker, 1 s (el sidecar sigue
+        // importando y aún no hay candidato probable).
+        let sleep = if marker_port.is_some() {
+            Duration::from_millis(250)
+        } else {
+            Duration::from_secs(1)
+        };
+        thread::sleep(sleep);
     }
     let _ = child.kill();
     let _ = child.wait();
@@ -279,6 +328,9 @@ fn run_lifecycle(app: AppHandle) {
         if STOP_FOR_UPDATE.load(Ordering::SeqCst) {
             return; // U13: stop_sidecar lo pidió (auto-update): no re-spawn
         }
+        // U22: etapa del splash — el texto inicial del splash es equivalente
+        // (si la webview carga tarde a este evento no se pierde nada).
+        emit_state(&app, "starting", BASE_PORT);
         if let Some(port) = find_existing_backend() {
             monitor_reused(&app, port);
             // el backend ajeno desapareció → se intenta levantar propio
@@ -288,6 +340,9 @@ fn run_lifecycle(app: AppHandle) {
             emit_state(&app, "stopped", BASE_PORT);
             return;
         }
+        // U22: etapa del splash — a partir de aquí el sidecar se está
+        // levantando de verdad (los ~1.5 s siguientes son su import).
+        emit_state(&app, "spawning", BASE_PORT);
         match spawn_and_wait(&app) {
             Some(port) => {
                 monitor_owned(&app, port);

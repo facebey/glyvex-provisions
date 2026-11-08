@@ -2,6 +2,11 @@
 
 Todo se sirve en 127.0.0.1 (lo garantiza el launch de uvicorn). El frontend
 (Vite :5173) usa proxy de /api hacia este backend, así que no hay CORS.
+
+U23 (fix de arranque 2026-11-07): las constantes del core `hf_down` se
+importan DIFERIDO en las funciones que las usan: al importarse, `hf_down`
+carga huggingface_hub (el import pesado del sidecar) aunque aquí solo se
+necesitan los regex/sets.
 """
 from __future__ import annotations
 
@@ -12,9 +17,6 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-
-from hf_down import (MMPROJ_RE, MTP_RE, QUANT_RE, SUPPORT_EXTS,
-                     SUPPORT_MAX_SIZE, WEIGHT_EXTS)
 
 from . import catalog
 from . import downloads as dl
@@ -44,6 +46,7 @@ class DownloadReq(BaseModel):
 def _file_label(path: str) -> str:
     """Etiqueta de ARCHIVOS DE PESOS, con las MISMAS reglas que el core
     (mmproj/MTP antes que la cuantización)."""
+    from hf_down import MMPROJ_RE, MTP_RE, QUANT_RE  # U23: diferido
     base = path.rsplit("/", 1)[-1]
     if MMPROJ_RE.search(base):
         return "mmproj (visión)"
@@ -59,6 +62,7 @@ def _is_main_gguf(path: str) -> bool:
     ni MTP (módulo multi-token-predicción). El MTP importa aparte: su
     cabecera NO son los hparams del cuerpo (cachearla contamina la meta del
     repo) y no hereda la KV del principal (va por v1, peso x margen)."""
+    from hf_down import MMPROJ_RE, MTP_RE  # U23: diferido
     base = path.rsplit("/", 1)[-1]
     return not (MMPROJ_RE.search(base) or MTP_RE.search(base))
 
@@ -66,6 +70,7 @@ def _is_main_gguf(path: str) -> bool:
 def _aux_label(path: str, ext: str, size: int) -> str:
     """Etiqueta de archivos no-peso (model card, config, otros).
     Mismas categorías que el core (README, soporte <=1 MB, resto)."""
+    from hf_down import SUPPORT_EXTS, SUPPORT_MAX_SIZE  # U23: diferido
     base = path.rsplit("/", 1)[-1]
     if base.lower() == "readme.md":
         return "Model card"
@@ -249,6 +254,7 @@ def search(body: SearchReq) -> dict:
 
 @router.get("/repo/files")
 def repo_files(repo_id: str, regime: str = "gpu", profile: str = "local") -> dict:
+    from hf_down import WEIGHT_EXTS  # U23: diferido
     if regime not in fit.REGIMES:
         raise HTTPException(422, f"regimén inválido: {regime!r} "
                                  f"(usa {', '.join(fit.REGIMES)})")
