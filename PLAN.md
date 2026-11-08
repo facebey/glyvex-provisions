@@ -204,6 +204,18 @@ Orden elegido: U12 desbloquea U13 (el updater necesita repo público); U14 es in
 
 **Meta <5 s en esta PC CUMPLIDA y reforzada (−82% sobre baseline: 22,7 s → 4,0 s calida)**. El ~2.9 s de sonda restante se va con U21 al reparar el stack TCP (la sonda paralela entonces es <10 ms). En una PC sana el arranque estimado ≈ 2,5–3 s. Verificación 2026-11-08: `npm run build` (tauri.ts con etapas) + `cargo check` + `cargo build --release` verdes; sidecar re-congelado con PyInstaller (`provisions.spec`, sin cambios — `collect_submodules` sigue recolectando los módulos aunque sean lazy) y re-copiado a `target/release/resources/provisions-backend` (carpeta REAL, no junction: hay que re-copiar el contenido tras cada rebuild del sidecar).
 
+### Release v0.2.1 (2026-11-08)
+
+**PUBLICADO 2026-11-08** con GO de Fabian ("si publiquemos por favor"). Release de rendimiento: fix de arranque lento de la app (U19–U23, ya en `main` vía merge `8400265`) — sin cambios en semáforo, descargas, perfiles ni lanzador.
+
+- **Rama/tag**: `release/v0.2.1` (desde `main` @ `8400265`), commit de bump `c209a4f` (`Cargo.toml` + `tauri.conf.json` + `Cargo.lock` vía `cargo update --package glyvex-provisions --precise 0.2.1`), tag `v0.2.1` → `c209a4f` (mismo patrón que v0.2.0: el tag apunta al bump), rama + tag pusheados.
+- **Assets** (release `v0.2.1`): NSIS 27.157.349 B (25,90 MiB) sha256 `a91284271f277e61ec5dbe679a569cc8cc043e05b7383821c70cab1f364c2831` + `.sig` minisign (448 chars) + `latest.json` firmado (788 B, pub_date `2026-11-08T19:18:37Z`); feed `releases/latest/download/latest.json` verado sirviendo versión 0.2.1, URL exacta del asset y la firma; URL pública del asset 200 anónimo (HEAD); body de la release verificado (acentos OK).
+- **Arquive** (`Installer/`, gitignored): `release-notes-0.2.1.md` + exe + `.sig` + `latest.json`.
+- **Instalación**: 0.2.1 sobre 0.2.0 en `D:\Glyvex Provisions` (NSIS `/S /D=`, por-usuario); verificado: exe `ProductVersion 0.2.1` + registro `DisplayVersion 0.2.1` (InstallLocation `"D:\Glyvex Provisions"`); verificación en vivo: app instalada lanzada → `/api/healthz` **200 en 5 248 ms** (doble-clic→sidecar arriba, con la anomalía TCP de la PC todavía presente); data intacta en `%LOCALAPPDATA%\glyvex-provisions\data`; estado final verificado: app no corriendo, puerto 8321 libre.
+- **Merge**: `--no-ff` a `main` + push.
+- **Borrado de ramas**: `release/v0.2.1` + `fix/arranque-ladder-paralelo` (local + remota) — **pendiente GO de Fabian** (mismo patrón que el cierre 2026-11-04 de v0.2.0; verificar `git branch --merged main` antes de borrar).
+- **Pendiente (U21, PC del usuario)**: `netsh winsock reset` + `netsh int tcp reset` + reboot (lo hace Fabian; es solo de su PC). Tras el reinicio: re-medir el arranque en vivo (se esperan sonderas <10 ms en vez de ~2.9 s → arranque estimado ~1.5–2 s) y actualizar la tabla de la sección «Fix de performance de arranque» de arriba.
+
 ## 7. Decisiones
 
 1. **Stack**: ✅ **A — FastAPI + React (Vite + TypeScript)** (elegido por Fabian, 2026-10-24).
