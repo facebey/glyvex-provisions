@@ -16,6 +16,10 @@
 //!    3 intentos de spawn.
 //! 5. Emite `sidecar-state {state, url, port}` con heartbeat cada 5 s (la
 //!    webview puede cargar tarde) hasta que el sidecar muere → reintento.
+//!    U22: además emite las ETAPAS del arranque (`starting` → `spawning` →
+//!    `listening`) para que el splash muestre el progreso real, no solo una
+//!    barra genérica (la webview puede llegar tarde a `starting`; el texto
+//!    inicial del splash es equivalente).
 //! 6. En `RunEvent::Exit` mata al sidecar propio (los reutilizados del flujo
 //!    dev se dejan vivos, que es lo que hizo el usuario con start.ps1).
 //!
@@ -245,9 +249,16 @@ fn spawn_and_wait(app: &AppHandle) -> Option<u16> {
 
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut marker_port: Option<u16> = None;
+    let mut marker_announced = false;
     while Instant::now() < deadline {
         if let Ok(Some(p)) = rx.try_recv() {
             marker_port = Some(p);
+            // U22: el backend ya está arriba (marcó su puerto): etapa final
+            // del splash ("conectando…"); el healthz real llega en <1 s.
+            if !marker_announced {
+                marker_announced = true;
+                emit_state(app, "listening", p);
+            }
         }
         // Con marker usamos ese puerto; sin él (o antes de que llegue), la
         // escalera: el backend ya está bound en alguno de los vecinos.
@@ -317,6 +328,9 @@ fn run_lifecycle(app: AppHandle) {
         if STOP_FOR_UPDATE.load(Ordering::SeqCst) {
             return; // U13: stop_sidecar lo pidió (auto-update): no re-spawn
         }
+        // U22: etapa del splash — el texto inicial del splash es equivalente
+        // (si la webview carga tarde a este evento no se pierde nada).
+        emit_state(&app, "starting", BASE_PORT);
         if let Some(port) = find_existing_backend() {
             monitor_reused(&app, port);
             // el backend ajeno desapareció → se intenta levantar propio
@@ -326,6 +340,9 @@ fn run_lifecycle(app: AppHandle) {
             emit_state(&app, "stopped", BASE_PORT);
             return;
         }
+        // U22: etapa del splash — a partir de aquí el sidecar se está
+        // levantando de verdad (los ~1.5 s siguientes son su import).
+        emit_state(&app, "spawning", BASE_PORT);
         match spawn_and_wait(&app) {
             Some(port) => {
                 monitor_owned(&app, port);

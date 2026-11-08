@@ -22,6 +22,11 @@ y no bloquean a los demás archivos.
 
 Destino: el path de storage elegido (R11): `<storage>\<repo>`.
 Token: el propio huggingface_hub (env HF_TOKEN o `hf auth login`).
+
+U23 (fix de arranque 2026-11-07): `huggingface_hub` y el core `resumable`
+(importan huggingface_hub + httpx2 a su vez) se cargan DIFERIDO, dentro de
+los métodos que los usan: son pesados y solo hacen falta con un job real,
+no al arrancar el sidecar. Python los cachea en sys.modules.
 """
 from __future__ import annotations
 
@@ -32,10 +37,6 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from huggingface_hub import HfApi, get_token
-from huggingface_hub.utils import HfHubHTTPError
-from resumable import DownloadFailed, DownloadPaused, hf_resumable_download
 
 from . import hfsearch
 
@@ -65,6 +66,7 @@ class DownloadManager:
 
     def submit(self, repo_id: str, files: list[str],
                dest: Path = DEFAULT_DEST) -> Job:
+        from huggingface_hub.utils import HfHubHTTPError  # U23: diferido
         try:
             files = sorted(_expand_patterns(repo_id, files))
         except HfHubHTTPError as e:
@@ -131,6 +133,11 @@ class DownloadManager:
     # ------------------------------------------------------------------ #
 
     def _run(self, job: Job) -> None:
+        # U23: diferido — el core de descarga (resumable, que a su vez importa
+        # huggingface_hub + httpx2) solo se carga con un job realmente corriendo.
+        from huggingface_hub.utils import HfHubHTTPError
+        from resumable import (DownloadFailed, DownloadPaused,
+                               hf_resumable_download)
         job.status = "running"
         last = {"t": 0.0}
         dest_dir = Path(job.dest) / job.repo_id
@@ -226,6 +233,8 @@ def _expand_patterns(repo_id: str, files: list[str],
     has_glob = any(c in f for f in files for c in _GLOB_CHARS)
     if not has_glob:
         return list(files)
+    # U23: diferido — solo si hay glob que expandir contra el tree.
+    from huggingface_hub import HfApi, get_token
     token = get_token()
     api = HfApi(token=token) if token else HfApi()
     tree = [

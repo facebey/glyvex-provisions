@@ -20,14 +20,16 @@ DATA_DIR de la Suite (dónde vive su runtime gestionado):
   `PROV_SUITE_DATA_DIR`. `find_managed_runtime()` recorre TODOS los
   candidatos (override propio, GLYVEX_DATA_DIR, bundle) y elige el pin más
   alto entre todos.
+
+U23 (fix de arranque 2026-11-07): `httpx2` se importa DIFERIDO, dentro de
+las funciones que hacen HTTP contra la Suite: solo hace falta con una Suite
+abierta y una acción real, no al arrancar el sidecar.
 """
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-
-import httpx2
 
 DATA_DIR_DEFAULT = Path(
     os.environ.get("LOCALAPPDATA") or str(Path.home())
@@ -103,6 +105,7 @@ def find_managed_runtime() -> dict | None:
 
 def health() -> dict | None:
     """{status, version} si la Suite está viva; None si no responde."""
+    import httpx2  # U23: diferido
     try:
         r = httpx2.get(f"{_base()}/api/health", timeout=2.0)
         if r.status_code == 200:
@@ -146,6 +149,7 @@ def register_folder(folder: str | Path) -> dict:
 
     Raise: SuiteNotRunning, ValueError (la carpeta no existe), httpx2.HTTPError
     """
+    import httpx2  # U23: diferido
     p = Path(folder)
     if not p.is_dir():
         raise ValueError(f"carpeta inexistente: {p}")

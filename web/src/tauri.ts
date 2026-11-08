@@ -171,14 +171,24 @@ export function sidecarGate(): boolean {
   if (preview) return true
   void import('@tauri-apps/api/event')
     .then(({ listen }) =>
+      // U22: etapas reales del arranque en vez de barra genérica. Rust emite
+      // starting → spawning → listening → running (la webview puede llegar
+      // tarde a `starting`: el texto inicial del splash es equivalente).
       listen<{ state: string; url?: string }>('sidecar-state', (ev) => {
         const p = ev.payload
+        const msg = document.getElementById('prov-boot-msg')
         if (p?.state === 'running' && p.url) {
+          if (msg) msg.textContent = 'Listo'
           // ?prov=boot: cache-buster para la primera carga (patrón PUB-13 de la Suite)
           location.replace(p.url + '/?prov=boot')
         } else if (p?.state === 'stopped') {
-          const msg = document.getElementById('prov-boot-msg')
           if (msg) msg.textContent = 'El backend no arrancó. Reintentando…'
+        } else if (p?.state === 'spawning') {
+          if (msg) msg.textContent = 'Arrancando el servicio local…'
+        } else if (p?.state === 'listening') {
+          if (msg) msg.textContent = 'Servicio listo — conectando…'
+        } else if (p?.state === 'starting') {
+          if (msg) msg.textContent = 'Iniciando el backend local…'
         }
       }),
     )

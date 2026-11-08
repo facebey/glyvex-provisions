@@ -12,6 +12,10 @@
 v1: el escaneo es síncrono (el endpoint FastAPI lo corre en thread pool);
 los paths de NAS lentos pueden tardar — por eso hay cap de archivos y
 conteo de errores en vez de timeout.
+
+U23 (fix de arranque 2026-11-07): las constantes de `hf_down` se importan
+DIFERIDO en las funciones que las usan (al importarse, `hf_down` carga
+huggingface_hub, el import pesado del sidecar).
 """
 from __future__ import annotations
 
@@ -24,8 +28,6 @@ import uuid
 from pathlib import Path
 
 from pydantic import BaseModel, Field
-
-from hf_down import MMPROJ_RE, MTP_RE, QUANT_RE, WEIGHT_EXTS
 
 from .paths import DATA_DIR
 
@@ -135,6 +137,7 @@ def delete_storage(storage_id: str) -> bool:
 def _weight_label(path: str) -> str:
     """Mismas reglas de etiquetado que api._file_label (mmproj/MTP antes
     que la cuantización)."""
+    from hf_down import MMPROJ_RE, MTP_RE, QUANT_RE  # U23: diferido
     base = path.rsplit(os.sep, 1)[-1]
     if MMPROJ_RE.search(base):
         return "mmproj (visión)"
@@ -152,6 +155,7 @@ def scan_library(storage_id: str | None = None) -> dict:
     contiene al menos un archivo de peso = un modelo (sus subcarpetas,
     ej. gguf/, quedan agrupadas dentro del mismo directorio padre).
     """
+    from hf_down import WEIGHT_EXTS  # U23: diferido
     storages = [get_storage(storage_id)] if storage_id else _load()
     storages = [s for s in storages if s is not None]
 

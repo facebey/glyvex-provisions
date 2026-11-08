@@ -188,8 +188,8 @@ Orden elegido: U12 desbloquea U13 (el updater necesita repo público); U14 es in
 | 19 | **Sonda del ladder en PARALELO** (`find_existing_backend` en `web/src-tauri/src/lib.rs`: un hilo por puerto, mpsc; si varios backends sanos reportan gana el puerto MÁS BAJO — mismo resultado determinista que la versión secuencial, pero cuesta 1 sonda en vez de 10) | ✅ Implementado y verado en vivo 2026-11-07 (rama `fix/arranque-ladder-paralelo`) |
 | 20 | Poll del spawn de 1 s → **250 ms tras el marker** (`spawn_and_wait`: con `marker_port` en mano el backend está casi arriba → poll fino; sin marker sigue a 1 s) | ✅ Implementado y verado en vivo 2026-11-07 (misma rama) |
 | 21 | **Reparar el stack TCP de la PC**: `netsh winsock reset` + `netsh int tcp reset` + reboot + re-medición (máquina, sin código; elimina la anomalía del SYN lento a nivel sistema) | ⏳ Pendiente decisión/timing de Fabian (requiere reboot) |
-| 22 | Splash con etapas ("Iniciando servicio… / Listo") en vez de barra genérica (percepción) | ⏳ Pendiente decisión de Fabian |
-| 23 | Import diferido de `huggingface_hub` en el sidecar (solo al buscar/descargar; −0.5–1 s al sidecar) | ⏳ Pendiente decisión de Fabian |
+| 22 | **Splash con ETAPAS** en vez de barra genérica (percepción): Rust emite `starting` (inicio del ciclo), `spawning` (antes de lanzar el sidecar) y `listening` (1.ª vez que llega el marker `#PORT_ASSIGNED#`) vía `emit_state`; `tauri.ts` las mapea a textos ("Iniciando el backend local…" / "Arrancando el servicio local…" / "Servicio listo — conectando…" / "Listo" / "El backend no arrancó. Reintentando…"). La webview puede llegar tarde a `starting` (el texto inicial del splash es equivalente; no se pierde nada) | ✅ Implementado y verado en vivo 2026-11-08 (misma rama; opción C de Fabian: U22+U23 van a la rama ANTES del merge a main) |
+| 23 | **Import DIFERIDO de todo lo que arrastra `huggingface_hub`/`httpx2`/los cores** de la cadena de arranque (no solo huggingface_hub): `hfsearch.py` (sin `API` global; `has_token`/`search_models`/`repo_files` con imports locales), `downloads.py` (`submit`/`_run`/`_expand_patterns`), `api.py` (constantes de `hf_down` por función), `storage.py` (`_weight_label`/`scan_library`), `gguf.py` (`resumable.prefetch_head` en `repo_gguf_meta`), `launcher.py` y `suite.py` (`httpx2` por función). Python cachea en sys.modules → el coste es el de la 1.ª llamada. `catalog.json` (17 KB, `lru_cache`) no pesa: no se tocó. `import app.main` venv: **8 452 → 976 ms (−88%)**; al arrancar NO carga ninguna de las cadenas pesadas (verificado con `sys.modules`) | ✅ Implementado y verado en vivo 2026-11-08 (misma rama) |
 
 **Verificación en vivo (2026-11-07, build release incremental desde la rama; `cargo check` + `cargo build --release` verdes; sidecar/resources intactos del build 0.2.0)**:
 
@@ -197,10 +197,12 @@ Orden elegido: U12 desbloquea U13 (el updater necesita repo público); U14 es in
 |---|---|---|
 | Baseline 0.2.0 instalado (fría) | 21 539 ms | 22 698 ms |
 | Baseline 0.2.0 instalado (2.ª) | 21 424 ms | 22 625 ms |
-| **Tras U19+U20 (1.ª, cache fría)** | 3 568 ms | 7 390 ms |
-| **Tras U19+U20 (2.ª, calida)** | 3 444 ms | **4 577 ms** |
+| Tras U19+U20 (1.ª, cache fría) | 3 568 ms | 7 390 ms |
+| Tras U19+U20 (2.ª, calida) | 3 444 ms | 4 577 ms |
+| **Tras U19+U20+U22+U23 (fría, sidecar congelado re-hecho)** | 3 100 ms | 7 042 ms |
+| **Tras U19+U20+U22+U23 (calida)** | **2 913 ms** | **4 026 ms** |
 
-**Meta <5 s en esta PC CUMPLIDA (−80% sobre baseline)**; el ~2.4 s de sonda restante se va con U21 al reparar el stack TCP (la sonda paralela entonces es <10 ms). En una PC sana el arranque estimado ≈ 3 s.
+**Meta <5 s en esta PC CUMPLIDA y reforzada (−82% sobre baseline: 22,7 s → 4,0 s calida)**. El ~2.9 s de sonda restante se va con U21 al reparar el stack TCP (la sonda paralela entonces es <10 ms). En una PC sana el arranque estimado ≈ 2,5–3 s. Verificación 2026-11-08: `npm run build` (tauri.ts con etapas) + `cargo check` + `cargo build --release` verdes; sidecar re-congelado con PyInstaller (`provisions.spec`, sin cambios — `collect_submodules` sigue recolectando los módulos aunque sean lazy) y re-copiado a `target/release/resources/provisions-backend` (carpeta REAL, no junction: hay que re-copiar el contenido tras cada rebuild del sidecar).
 
 ## 7. Decisiones
 
