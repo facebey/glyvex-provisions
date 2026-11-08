@@ -216,6 +216,10 @@ Orden elegido: U12 desbloquea U13 (el updater necesita repo público); U14 es in
 - **Borrado de ramas**: `release/v0.2.1` + `fix/arranque-ladder-paralelo` (local + remota) — **pendiente GO de Fabian** (mismo patrón que el cierre 2026-11-04 de v0.2.0; verificar `git branch --merged main` antes de borrar).
 - **Pendiente (U21, PC del usuario)**: `netsh winsock reset` + `netsh int tcp reset` + reboot (lo hace Fabian; es solo de su PC). Tras el reinicio: re-medir el arranque en vivo (se esperan sonderas <10 ms en vez de ~2.9 s → arranque estimado ~1.5–2 s) y actualizar la tabla de la sección «Fix de performance de arranque» de arriba.
 
+### Docs bilingüe EN/ES (2026-11-08)
+
+Set de documentación bilingüe espejando el patrón OSS de la Suite (EN primario; cada página con `> **Language:**` a su par; ES con voseo; índice "Documentation" en el README). **Cerrado y publicado 2026-11-08** (GO de Fabian): 18 archivos / +1380 líneas — README.md + README.es.md (bullets 0.2.0 lanzador/Suite/presets-vision + 0.2.1 arranque rápido, link al repo compañero hf-downloader, ruta de dev genérica, índice de docs) + pares de raíz `CHANGELOG` (0.1.0→0.2.1 con fechas reales de `gh release list`), `CONTRIBUTING`, `CONTRIBUTORS`, `SECURITY` + carpeta `docs/` nueva: `QUICKSTART`, `LAUNCHER`, `ARCHITECTURE`, `TROUBLESHOOTING` (casos reales: arranque lento 22→4 s + anomalía TCP/netsh, repos gated 401/403, puerto ≠8321 (escalera), splash retry + `sidecar-stderr.log`, ACL updater pre-0.1.2, destino 422, data dir). No se tocó `web/README.md` (boilerplate Vite — decisión pendiente de Fabian). Commits: `15074ea` (READMEs) + `39bd9f0` (raíz) + `254f0c7` (docs/) en rama `docs/doc-bilingue-en-es`; merge `--no-ff` a main `9ac6fe1` + push; 12 archivos verificados 200 en raw.githubusercontent (main). **Pendiente**: borrado de la rama `docs/doc-bilingue-en-es` (local + remota) — espera GO.
+
 ## 7. Decisiones
 
 1. **Stack**: ✅ **A — FastAPI + React (Vite + TypeScript)** (elegido por Fabian, 2026-10-24).
