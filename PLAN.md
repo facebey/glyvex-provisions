@@ -212,7 +212,7 @@ Orden elegido: U12 desbloquea U13 (el updater necesita repo público); U14 es in
 - **Assets** (release `v0.2.1`): NSIS 27.157.349 B (25,90 MiB) sha256 `a91284271f277e61ec5dbe679a569cc8cc043e05b7383821c70cab1f364c2831` + `.sig` minisign (448 chars) + `latest.json` firmado (788 B, pub_date `2026-11-08T19:18:37Z`); feed `releases/latest/download/latest.json` verado sirviendo versión 0.2.1, URL exacta del asset y la firma; URL pública del asset 200 anónimo (HEAD); body de la release verificado (acentos OK).
 - **Arquive** (`Installer/`, gitignored): `release-notes-0.2.1.md` + exe + `.sig` + `latest.json`.
 - **Instalación**: 0.2.1 sobre 0.2.0 en `D:\Glyvex Provisions` (NSIS `/S /D=`, por-usuario); verificado: exe `ProductVersion 0.2.1` + registro `DisplayVersion 0.2.1` (InstallLocation `"D:\Glyvex Provisions"`); verificación en vivo: app instalada lanzada → `/api/healthz` **200 en 5 248 ms** (doble-clic→sidecar arriba, con la anomalía TCP de la PC todavía presente); data intacta en `%LOCALAPPDATA%\glyvex-provisions\data`; estado final verificado: app no corriendo, puerto 8321 libre.
-- **Merge**: `--no-ff` a `main` + push.
+- **Merge**: `--no-ff` a `main` (merge `4612b34`) + push.
 - **Borrado de ramas**: `release/v0.2.1` + `fix/arranque-ladder-paralelo` (local + remota) — **pendiente GO de Fabian** (mismo patrón que el cierre 2026-11-04 de v0.2.0; verificar `git branch --merged main` antes de borrar).
 - **Pendiente (U21, PC del usuario)**: `netsh winsock reset` + `netsh int tcp reset` + reboot (lo hace Fabian; es solo de su PC). Tras el reinicio: re-medir el arranque en vivo (se esperan sonderas <10 ms en vez de ~2.9 s → arranque estimado ~1.5–2 s) y actualizar la tabla de la sección «Fix de performance de arranque» de arriba.
 
