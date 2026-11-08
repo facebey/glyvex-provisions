@@ -2,7 +2,10 @@
 //!
 //! Ciclo de vida del sidecar (adaptado de `src-tauri/src/lib.rs` de la Suite):
 //! 1. Si ya hay un backend asentado en la escalera 8321..8330 (flujo dev con
-//!    `start.ps1`) se REUTILIZA: no se duplica el proceso.
+//!    `start.ps1`) se REUTILIZA: no se duplica el proceso. La sonda de la
+//!    escalera es PARALELA (U19, un hilo por puerto): su costo es 1 sonda, no
+//!    10 — con un stack TCP de loopback dañado la versión secuencial tardaba
+//!    ~20 s antes de llegar al step 2.
 //! 2. Si no, lo spawn-ea: en dev con el python del `.venv` (`-m app.main`,
 //!    cwd = raíz del repo); en producción con el sidecar PyInstaller empaquetado
 //!    como resource (`provisions-backend/provisions-backend.exe`).
@@ -67,8 +70,34 @@ fn health_ok(port: u16) -> bool {
     matches!(ureq::get(&url).timeout(Duration::from_secs(2)).call(), Ok(r) if r.status() == 200)
 }
 
+/// U19: sonda del ladder en PARALELO — un hilo por puerto, así la sonda de
+/// reutilización cuesta 1 sonda (la más lenta) y no 10. En una PC sana cada
+/// sonda es <10 ms, pero con el stack TCP de loopback dañado (un SYN a un
+/// puerto cerrado que no recibe RST hasta la retransmisión, ~2 s) la versión
+/// secuencial antigua (`.find`) costaba 10 × 2 s = 20 s de splash antes de
+/// spawnear el sidecar propio (medido 2026-11-07 en la PC de Fabian, tras el
+/// incidente de hardware). Determinista como la vieja: si varios backends
+/// sanos reportan, gana el puerto MÁS BAJO.
 fn find_existing_backend() -> Option<u16> {
-    (BASE_PORT..BASE_PORT + LADDER).find(|p| health_ok(*p))
+    let (tx, rx) = mpsc::channel::<u16>();
+    let mut probes = Vec::with_capacity(LADDER as usize);
+    for port in BASE_PORT..BASE_PORT + LADDER {
+        let tx = tx.clone();
+        probes.push(thread::spawn(move || {
+            if health_ok(port) {
+                let _ = tx.send(port);
+            }
+        }));
+    }
+    drop(tx); // los hilos ya tienen su clone
+    for probe in probes {
+        let _ = probe.join();
+    }
+    let mut healthy: Option<u16> = None;
+    while let Ok(port) = rx.try_recv() {
+        healthy = Some(healthy.map_or(port, |h| h.min(port)));
+    }
+    healthy
 }
 
 /// Mismo contrato que la Suite: línea exacta `#PORT_ASSIGNED:<puerto>#`.
@@ -232,7 +261,16 @@ fn spawn_and_wait(app: &AppHandle) -> Option<u16> {
         if child.try_wait().ok().flatten().is_some() {
             break; // murió antes de subir
         }
-        thread::sleep(Duration::from_secs(1));
+        // U20: con el marker en mano el backend está (casi) arriba — poll fino
+        // (250 ms) en vez de 1 s, recortando la latencia entre el healthz OK y
+        // el redirect de la webview; sin marker, 1 s (el sidecar sigue
+        // importando y aún no hay candidato probable).
+        let sleep = if marker_port.is_some() {
+            Duration::from_millis(250)
+        } else {
+            Duration::from_secs(1)
+        };
+        thread::sleep(sleep);
     }
     let _ = child.kill();
     let _ = child.wait();
