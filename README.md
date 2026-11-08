@@ -21,7 +21,11 @@ Everything runs on your machine (the app serves only on `127.0.0.1`). No telemet
 - **Resumable downloads**: `.part` files with sidecar metadata (ETag/SHA256), byte-level resume, pause/retry, live progress via SSE.
 - **Multi-path storage**: local disks, NAS or UNC paths; downloads and the traffic light are evaluated against the storage profile you choose.
 - **Model packs per scenario**: plain-JSON manifests (exact files or glob patterns), copyable between machines — one action downloads a whole scenario.
-- **Built on `hf-downloader`**: a small pure-Python core (TUI + library, no web dependencies) reused as the download engine. *(currently a private repo in the same family; opening it is on the roadmap)*
+- **Model launcher (0.2.0)**: launch any GGUF from your library with one click. Engine cascade (Glyvex-AI-Suite managed runtime → your own `llama-server` → Ollama), a launch profile per regime (`gpu` / `multi` / `offload` / `cpu` with per-regime `-ngl`, `--tensor-split` on multi-GPU), live server log, TTFB, tok/s and a VRAM snapshot while running.
+- **Glyvex-AI-Suite integration**: when the Suite is detected on the machine, register the launched server in the Suite (through its public API, with confirmation) and open the Suite with one click; without the Suite the launcher works standalone.
+- **Presets and vision (0.2.0)**: saveable launch presets per scenario (chat / vision / offload), `--mmproj` for vision models, free-form extra arguments, and a device inventory with the acceleration backend (CUDA/Vulkan/ROCm/SYCL/CPU).
+- **Fast startup (0.2.1)**: parallel port probing and lazy loading of the whole network stack — double-click to usable UI in ~4 s on a machine with a slow TCP stack (22.7 s before the fix) and ~1.5–2 s on a healthy one.
+- **Built on `hf-downloader`**: a small pure-Python core (TUI + library, no web dependencies) reused as the download engine. *(companion repo [facebey/hf-downloader](https://github.com/facebey/hf-downloader), private for now — opening it is on the roadmap)*
 
 ## Privacy
 
@@ -34,7 +38,8 @@ Everything runs on your machine (the app serves only on `127.0.0.1`). No telemet
 # Backend (own venv: .venv)
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
-.venv\Scripts\pip install -e D:\Proyectos\hf-downloader
+# Download core (companion repo facebey/hf-downloader — clone it once):
+.venv\Scripts\pip install -e <path-to-hf-downloader>
 .venv\Scripts\uvicorn app.main:app --host 127.0.0.1 --port 8321 --reload
 
 # Frontend (web/)
@@ -57,6 +62,21 @@ Or just run `start.ps1` / `start.bat` at the repo root: it reuses a live backend
 The installed app spawns the sidecar on open (reusing one already live on the 8321…8330 ladder) and points the webview to the real port; it dies when the window closes. Updater signing keys live in `web/src-tauri/updater/` (`private.key` + `password.txt`, gitignored — losing them invalidates signed updates; the public key is embedded in `tauri.conf.json`).
 
 `tauri:dev` (Tauri starts Vite) and `tauri:dev:reuse` (reuses an `npm run dev` already running on 8331) for developing inside the shell.
+
+## Documentation
+
+| Where to go | What you will find |
+|---|---|
+| [README](README.md) | The full picture: features, installation, development and release. |
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | The shortest path: install, first run, storage, first download, first launch. |
+| [`docs/LAUNCHER.md`](docs/LAUNCHER.md) | The model launcher: engines, profiles, presets, vision and Suite integration. |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Map of the app: Tauri shell, FastAPI sidecar, port ladder, persistence and updater. |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Common problems and how to solve them. |
+| [`CHANGELOG.md`](CHANGELOG.md) | What changed in every release. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute: setup, branches, commits and conventions. |
+| [`SECURITY.md`](SECURITY.md) | Security policy and how to report a vulnerability. |
+
+All docs are available in English and Spanish — each page links to its counterpart.
 
 ## License
 

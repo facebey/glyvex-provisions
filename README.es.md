@@ -21,7 +21,11 @@ Todo corre en tu máquina (la app solo sirve en `127.0.0.1`). Sin telemetría, s
 - **Descargas reanudables**: archivos `.part` con metadatos sidecar (ETag/SHA256), reanudación a nivel de byte, pausa/reintento, progreso en vivo por SSE.
 - **Storage multi-path**: discos locales, NAS o rutas UNC; las descargas y el semáforo se evalúan contra el perfil de storage que elijas.
 - **Paquetes de modelos por escenario**: manifiestos JSON de texto plano (archivos exactos o patrones glob), copiables entre máquinas — una acción descarga un escenario completo.
-- **Construida sobre `hf-downloader`**: un core chico de Python puro (TUI + librería, sin dependencias web) reutilizado como motor de descargas. *(hoy repo privado de la misma familia; su apertura está en el roadmap)*
+- **Lanzador de modelos (0.2.0)**: lanzá cualquier GGUF de tu librería con un clic. Cascada de engines (runtime gestionado de Glyvex-AI-Suite → tu propio `llama-server` → Ollama), perfil de lanzamiento por régimen (`gpu` / `multi` / `offload` / `cpu` con `-ngl` por régimen y `--tensor-split` en multi-GPU), log vivo del servidor, TTFB, tok/s y snapshot de VRAM en ejecución.
+- **Integración con Glyvex-AI-Suite**: si hay Suite en la máquina, registrá el servidor lanzado en la Suite (vía su API pública, con confirmación) y abrila con un clic; sin Suite el lanzador funciona igual en pie.
+- **Presets y visión (0.2.0)**: presets de lanzamiento guardables por escenario (chat / visión / offload), `--mmproj` para modelos de visión, argumentos extra libres e inventario de devices con el backend de aceleración (CUDA/Vulkan/ROCm/SYCL/CPU).
+- **Arranque rápido (0.2.1)**: sonda de puertos en paralelo y carga diferida de todo el stack de red — de doble-clic a UI usable en ~4 s en una máquina con stack TCP lento (22,7 s antes del fix) y ~1,5–2 s en una sana.
+- **Construida sobre `hf-downloader`**: un core chico de Python puro (TUI + librería, sin dependencias web) reutilizado como motor de descargas. *(repo compañero [facebey/hf-downloader](https://github.com/facebey/hf-downloader), privado por ahora — su apertura está en el roadmap)*
 
 ## Privacidad
 
@@ -34,7 +38,8 @@ Todo corre en tu máquina (la app solo sirve en `127.0.0.1`). Sin telemetría, s
 # Backend (venv propio .venv)
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
-.venv\Scripts\pip install -e D:\Proyectos\hf-downloader
+# Core de descargas (repo compañero facebey/hf-downloader — clonallo una vez):
+.venv\Scripts\pip install -e <path-to-hf-downloader>
 .venv\Scripts\uvicorn app.main:app --host 127.0.0.1 --port 8321 --reload
 
 # Frontend (web/)
@@ -57,6 +62,21 @@ O directamente `start.ps1` / `start.bat` en la raíz: reutiliza un backend vivo 
 La app instalada levanta el sidecar al abrir (reutiliza uno ya vivo en la escalera 8321…8330) y la webview se redirige al puerto real; muere al cerrar la ventana. Firmas del updater: `web/src-tauri/updater/` (`private.key` + `password.txt`, gitignored — perderlos invalida las updates firmadas; la pública va embebida en `tauri.conf.json`).
 
 `tauri:dev` (Vite lo levanta Tauri) y `tauri:dev:reuse` (reusa un `npm run dev` ya corriendo en 8331) para desarrollar dentro de la shell.
+
+## Documentación
+
+| A dónde ir | Qué vas a encontrar |
+|---|---|
+| [README](README.es.md) | El panorama completo: funcionalidades, instalación, desarrollo y release. |
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.es.md) | El camino más corto: instalar, primer arranque, storage, primera descarga, primer lanzamiento. |
+| [`docs/LAUNCHER.md`](docs/LAUNCHER.es.md) | El lanzador de modelos: engines, perfiles, presets, visión e integración con la Suite. |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.es.md) | El mapa de la app: shell Tauri, sidecar FastAPI, escalera de puertos, persistencia y updater. |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.es.md) | Problemas comunes y cómo resolverlos. |
+| [`CHANGELOG.md`](CHANGELOG.es.md) | Qué cambió en cada release. |
+| [`CONTRIBUTING.md`](CONTRIBUTING.es.md) | Cómo contribuir: setup, ramas, commits y convenciones. |
+| [`SECURITY.md`](SECURITY.es.md) | Política de seguridad y cómo reportar una vulnerabilidad. |
+
+Toda la doc está en inglés y en español — cada página enlaza a su contraparte.
 
 ## Licencia
 
