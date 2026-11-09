@@ -10,7 +10,7 @@ Todo corre en tu máquina (la app solo sirve en `127.0.0.1`). Sin telemetría, s
 
 - **Windows x64**: bajá el instalador más reciente desde [Releases](https://github.com/facebey/glyvex-provisions/releases) — `Glyvex.Provisions_<versión>_x64-setup.exe`. Instalación por usuario (sin administrador); elegís la carpeta de instalación.
 - Los datos de usuario viven en `%LOCALAPPDATA%\glyvex-provisions\data` y sobreviven a reinstalaciones.
-- **Auto-update**: cada release publica `latest.json` firmado (updater de Tauri + firma minisign); la app lo consulta y ofrece la actualización desde sí misma.
+- **Auto-update**: cada release publica `latest.json` firmado (updater de Tauri + firma minisign); la app lo consulta y ofrece la actualización desde sí misma. También podés verificarla manualmente cuando quieras desde el modal "Acerca de" del footer (© 2026 Glyvex → "Verificar actualizaciones").
 - El SHA256 de cada instalador se publica en las notas del release.
 
 ## Funcionalidades
@@ -25,6 +25,7 @@ Todo corre en tu máquina (la app solo sirve en `127.0.0.1`). Sin telemetría, s
 - **Integración con Glyvex-AI-Suite**: si hay Suite en la máquina, registrá el servidor lanzado en la Suite (vía su API pública, con confirmación) y abrila con un clic; sin Suite el lanzador funciona igual en pie.
 - **Presets y visión (0.2.0)**: presets de lanzamiento guardables por escenario (chat / visión / offload), `--mmproj` para modelos de visión, argumentos extra libres e inventario de devices con el backend de aceleración (CUDA/Vulkan/ROCm/SYCL/CPU).
 - **Arranque rápido (0.2.1)**: sonda de puertos en paralelo y carga diferida de todo el stack de red — de doble-clic a UI usable en ~4 s en una máquina con stack TCP lento (22,7 s antes del fix) y ~1,5–2 s en una sana.
+- **Links web y actualizaciones manuales (0.2.2)**: el título del header abre el sitio de Glyvex-AI-Suite, y el modal "Acerca de" del footer muestra la versión actual con links al sitio / grupo / GitHub más un "Verificar actualizaciones" manual — el mismo flujo de actualización firmado que el banner, cuando lo pedís.
 - **Construida sobre `hf-downloader`**: un core chico de Python puro (TUI + librería, sin dependencias web) reutilizado como motor de descargas. *(repo compañero [facebey/hf-downloader](https://github.com/facebey/hf-downloader), privado por ahora — su apertura está en el roadmap)*
 
 ## Privacidad
