@@ -380,6 +380,9 @@ pub fn run() {
         // process:allow-restart (capabilities) lo usa el updater tras instalar;
         // sin el plugin registrado el build rechaza esa permission.
         .plugin(tauri_plugin_process::init())
+        // U24: links externos (site/GitHub) en el navegador del SO; la webview
+        // no abre <a target=_blank> por sí sola (shell:allow-open en capabilities).
+        .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![stop_sidecar])
         .setup(|app| {
             let handle = app.handle().clone();

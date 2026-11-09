@@ -66,6 +66,8 @@ import {
   relaunchApp,
   stopSidecar,
 } from './tauri'
+import AboutModal from './components/AboutModal'
+import ExternalLink from './components/ExternalLink'
 
 interface JobView {
   id: string
@@ -124,6 +126,8 @@ export default function App() {
   const [updateProgress, setUpdateProgress] = useState(-1) // -1: total aún desconocido
   const [updateError, setUpdateError] = useState('')
   const [updateDismissed, setUpdateDismissed] = useState(false)
+  // U24: modal "Acerca de" (lo abre "© 2026 Glyvex" del footer).
+  const [aboutOpen, setAboutOpen] = useState(false)
 
   useEffect(() => {
     if (!isTauri()) return
@@ -1066,7 +1070,12 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">
+        {/* U24: título como link externo al sitio (patrón del header de la Suite) */}
+        <ExternalLink
+          className="brand brand-link"
+          href="https://ai-suite.glyvexgroup.com"
+          title="Glyvex AI — ai-suite.glyvexgroup.com"
+        >
           <span className="logo">
             {/* Isotopo Glyvex Provisions (2026-11-02): "descarga en bandeja" — mismo glyph que
                 assets/brand/app-icon.svg, recortado al trazo (sin tile) para el lockup del header. */}
@@ -1084,7 +1093,7 @@ export default function App() {
             </svg>
           </span> Glyvex Provisions
           <span className="sub">tu hardware → modelos que caben</span>
-        </div>
+        </ExternalLink>
         <div className="regimes">
           {(Object.keys(REGIME_LABELS) as Regime[]).map((r) => (
             <button
@@ -2407,8 +2416,19 @@ export default function App() {
       </section>
 
       <footer className="foot">
-        Glyvex Provisions · 100% local · backend 127.0.0.1:8321 · token HF solo por env / `hf auth login`
+        <span>Glyvex Provisions · 100% local · backend 127.0.0.1:8321 · token HF solo por env / `hf auth login`</span>
+        {/* U24: entrada al "Acerca de" (links + verificación manual de updates; patrón Suite) */}
+        <button
+          type="button"
+          className="about-trigger"
+          onClick={() => setAboutOpen(true)}
+          title="Acerca de Glyvex Provisions"
+        >
+          © 2026 Glyvex
+        </button>
       </footer>
+
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
     </div>
   )
 }
