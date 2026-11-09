@@ -65,6 +65,15 @@ export async function relaunchApp(): Promise<void> {
   await relaunch()
 }
 
+// U24: enlace externo en el navegador del SO (espejo de openExternal de la
+// Suite): la webview de Tauri no abre URLs por sí sola; open() delega al
+// handler del SO. Fuera de Tauri (dev) los llamadores usan <a> normal.
+export async function openExternal(url: string): Promise<void> {
+  if (!isTauri()) return
+  const { open } = await import('@tauri-apps/plugin-shell')
+  await open(url)
+}
+
 function splashStyleTag(): string {
   return `
     @font-face { font-family: Poppins; font-weight: 400; src: url(/fonts/poppins-regular.woff2) format("woff2"); }

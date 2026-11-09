@@ -8,5 +8,5 @@
       "http://127.0.0.1:*"
     ]
   },
-  "permissions": ["core:default", "updater:default", "process:allow-restart", "sidecar-control"]
+  "permissions": ["core:default", "updater:default", "process:allow-restart", "shell:allow-open", "sidecar-control"]
 }

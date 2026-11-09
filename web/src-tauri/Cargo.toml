@@ -16,6 +16,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-updater = "2"
 # required por updater:install() para reiniciar la app tras aplicar la update
 tauri-plugin-process = "2"
+# U24: open() para links externos en el navegador del SO (espejo de la Suite)
+tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # health-check del sidecar sin arrastrar reqwest/tokio (mismo criterio que la Suite)
