@@ -107,6 +107,13 @@ instalar** (la permission custom de ACL `sidecar-control` autoriza
 `stop_sidecar` desde la webview). La clave **pública** de firma está
 versionada; la privada vive fuera del repo (gitignored).
 
+El **banner** automático aparece solo cuando el feed publica una versión
+nueva. El modal **"Acerca de"** del footer (© 2026 Glyvex → "Verificar
+actualizaciones") corre la misma consulta a demanda a través del updater de
+Tauri, con estados de verificando / al día / disponible / descargando con
+progreso / error con reintento, y el mismo flujo de instalación: primero
+`stop_sidecar`, después la actualización NSIS y luego el reinicio.
+
 ## Superficie de red (toda)
 
 1. Hugging Face — búsqueda, metadata, descargas.

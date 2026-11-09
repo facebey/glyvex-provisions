@@ -9,9 +9,11 @@ El camino más corto para tener Glyvex Provisions corriendo en tu máquina. El
 > **¿Solo querés usarla en Windows?** Nada de esto es necesario: bajate el
 > instalador `Glyvex Provisions_<version>_x64-setup.exe` desde
 > [Releases → latest](https://github.com/facebey/glyvex-provisions/releases/latest),
-> ejecutalo y seguí el asistente (instalación por-usuario, sin admin). Si la
-> app te ofrece un banner de actualización, "Actualizar y reiniciar" se
-> encarga del resto. Esta guía es para correrla desde fuente.
+> ejecutalo y seguí el asistente (instalación por-usuario, sin admin). Las
+> nuevas versiones llegan como un banner in-app ("Actualizar y reiniciar");
+> también podés verificar actualizaciones cuando quieras desde el modal
+> "Acerca de" del footer (© 2026 Glyvex → "Verificar actualizaciones").
+> Esta guía es para correrla desde fuente.
 
 ## Prerrequisitos
 

@@ -4,6 +4,17 @@
 
 Todos los cambios notables de Glyvex Provisions. El SHA256 y el tamaño del instalador se publican en cada [release](https://github.com/facebey/glyvex-provisions/releases).
 
+## [0.2.2] — 2026-11-09
+
+Release de interfaz: **la app ahora tiene formas visibles de llegar a la web y de verificar actualizaciones**.
+
+*Republicada 2026-11-09: los primeros assets publicados para esta versión llevaban congelada una build anterior de la interfaz y no incluían los cambios de esta entrada; se reconstruyeron y reemplazaron en la misma tag — el instalador vigente en la página del release y su SHA256 publicado son los correctos.*
+
+### Añadido
+
+- **Header con link al sitio**: el título del header ahora enlaza al [sitio de Glyvex-AI-Suite](https://ai-suite.glyvexgroup.com), abierto en el navegador del sistema vía `tauri-plugin-shell` (`shell:allow-open`).
+- **Modal "Acerca de" desde el footer**: el botón "© 2026 Glyvex" abre un modal con la versión actual, links al sitio / grupo / GitHub y un botón **"Verificar actualizaciones" manual** con todos los estados: verificando, al día, versión disponible, descargando con progreso y error con reintento. La instalación reutiliza el flujo del banner: el backend local se detiene antes de descargar (NSIS no puede sobrescribir un sidecar vivo) y la app se reinicia.
+
 ## [0.2.1] — 2026-11-08
 
 Release de rendimiento: **el arranque es hasta un 82 % más rápido** (22,7 s → 4,0 s medidos en una máquina real, con su anomalía de red local incluida). Sin cambios en semáforo, descargas, perfiles ni lanzador.

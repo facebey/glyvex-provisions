@@ -104,6 +104,13 @@ before installing** (custom ACL permission `sidecar-control` authorizes
 `stop_sidecar` from the webview). The signing **public** key is versioned;
 the private key lives outside the repo (gitignored).
 
+The automatic **banner** only appears when the feed publishes a new version.
+The footer's **About** dialog (© 2026 Glyvex → "Check for updates") runs the
+same check on demand through the Tauri updater, with states for checking /
+up to date / available / downloading with progress / error with retry, and
+the same install flow: `stop_sidecar` first, then the NSIS update, then the
+restart.
+
 ## Network surface (all of it)
 
 1. Hugging Face — search, metadata, downloads.

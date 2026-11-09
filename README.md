@@ -10,7 +10,7 @@ Everything runs on your machine (the app serves only on `127.0.0.1`). No telemet
 
 - **Windows x64**: get the latest installer from [Releases](https://github.com/facebey/glyvex-provisions/releases) — `Glyvex.Provisions_<version>_x64-setup.exe`. Per-user install (no administrator needed); you choose the install folder.
 - User data lives in `%LOCALAPPDATA%\glyvex-provisions\data` and survives reinstalls.
-- **Auto-update**: releases ship a signed `latest.json` (Tauri updater + minisign signature); the app checks it and offers the update in-app.
+- **Auto-update**: releases ship a signed `latest.json` (Tauri updater + minisign signature); the app checks it and offers the update in-app. You can also check manually at any time from the footer's About dialog (© 2026 Glyvex → "Check for updates").
 - SHA256 of each installer is published in the release notes.
 
 ## Features
@@ -25,6 +25,7 @@ Everything runs on your machine (the app serves only on `127.0.0.1`). No telemet
 - **Glyvex-AI-Suite integration**: when the Suite is detected on the machine, register the launched server in the Suite (through its public API, with confirmation) and open the Suite with one click; without the Suite the launcher works standalone.
 - **Presets and vision (0.2.0)**: saveable launch presets per scenario (chat / vision / offload), `--mmproj` for vision models, free-form extra arguments, and a device inventory with the acceleration backend (CUDA/Vulkan/ROCm/SYCL/CPU).
 - **Fast startup (0.2.1)**: parallel port probing and lazy loading of the whole network stack — double-click to usable UI in ~4 s on a machine with a slow TCP stack (22.7 s before the fix) and ~1.5–2 s on a healthy one.
+- **Web links and manual updates (0.2.2)**: the header title opens the Glyvex-AI-Suite site, and the footer's About dialog shows the current version with links to the site / group / GitHub plus a manual "Check for updates" — the same signed update flow as the banner, on demand.
 - **Built on `hf-downloader`**: a small pure-Python core (TUI + library, no web dependencies) reused as the download engine. *(companion repo [facebey/hf-downloader](https://github.com/facebey/hf-downloader), private for now — opening it is on the roadmap)*
 
 ## Privacy
